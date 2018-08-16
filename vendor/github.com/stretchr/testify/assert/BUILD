@@ -11,6 +11,8 @@ go_library(
         "forward_assertions.go",
         "http_assertions.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/stretchr/testify/assert",
+    importpath = "github.com/stretchr/testify/assert",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/davecgh/go-spew/spew:go_default_library",

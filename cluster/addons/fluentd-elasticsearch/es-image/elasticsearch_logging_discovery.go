@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientapi "k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/kubernetes/pkg/api"
+	api "k8s.io/kubernetes/pkg/apis/core"
 	clientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 )
 
@@ -81,10 +82,15 @@ func main() {
 	}
 
 	var elasticsearch *api.Service
-	// Look for endpoints associated with the Elasticsearch loggging service.
+	serviceName := os.Getenv("ELASTICSEARCH_SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "elasticsearch-logging"
+	}
+
+	// Look for endpoints associated with the Elasticsearch logging service.
 	// First wait for the service to become available.
 	for t := time.Now(); time.Since(t) < 5*time.Minute; time.Sleep(10 * time.Second) {
-		elasticsearch, err = client.Core().Services(namespace).Get("elasticsearch-logging", metav1.GetOptions{})
+		elasticsearch, err = client.Core().Services(namespace).Get(serviceName, metav1.GetOptions{})
 		if err == nil {
 			break
 		}
@@ -99,9 +105,9 @@ func main() {
 	var endpoints *api.Endpoints
 	addrs := []string{}
 	// Wait for some endpoints.
-	count := 0
+	count, _ := strconv.Atoi(os.Getenv("MINIMUM_MASTER_NODES"))
 	for t := time.Now(); time.Since(t) < 5*time.Minute; time.Sleep(10 * time.Second) {
-		endpoints, err = client.Core().Endpoints(namespace).Get("elasticsearch-logging", metav1.GetOptions{})
+		endpoints, err = client.Core().Endpoints(namespace).Get(serviceName, metav1.GetOptions{})
 		if err != nil {
 			continue
 		}
@@ -110,7 +116,6 @@ func main() {
 		if len(addrs) > 0 && len(addrs) == count {
 			break
 		}
-		count = len(addrs)
 	}
 	// If there was an error finding endpoints then log a warning and quit.
 	if err != nil {

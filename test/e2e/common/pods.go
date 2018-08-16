@@ -128,7 +128,12 @@ var _ = framework.KubeDescribe("Pods", func() {
 		podClient = f.PodClient()
 	})
 
-	It("should get a host IP [Conformance]", func() {
+	/*
+		Release : v1.9
+		Testname: Pods, assigned hostip
+		Description: Create a Pod. Pod status MUST return successfully and contains a valid IP address.
+	*/
+	framework.ConformanceIt("should get a host IP [NodeConformance]", func() {
 		name := "pod-hostip-" + string(uuid.NewUUID())
 		testHostIP(podClient, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -138,14 +143,19 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:  "test",
-						Image: framework.GetPauseImageName(f.ClientSet),
+						Image: imageutils.GetPauseImageName(),
 					},
 				},
 			},
 		})
 	})
 
-	It("should be submitted and removed [Conformance]", func() {
+	/*
+		Release : v1.9
+		Testname: Pods, lifecycle
+		Description: A Pod is created with a unique label. Pod MUST be accessible when queried using the label selector upon creation. Add a watch, check if the Pod is running. Pod then deleted, The pod deletion timestamp is observed. The watch MUST return the pod deleted event. Query with the original selector for the Pod MUST return empty list.
+	*/
+	framework.ConformanceIt("should be submitted and removed [NodeConformance]", func() {
 		By("creating the pod")
 		name := "pod-submit-remove-" + string(uuid.NewUUID())
 		value := strconv.Itoa(time.Now().Nanosecond())
@@ -161,7 +171,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:  "nginx",
-						Image: imageutils.GetE2EImage(imageutils.NginxSlim),
+						Image: imageutils.GetE2EImage(imageutils.Nginx),
 					},
 				},
 			},
@@ -266,7 +276,12 @@ var _ = framework.KubeDescribe("Pods", func() {
 		Expect(len(pods.Items)).To(Equal(0))
 	})
 
-	It("should be updated [Conformance]", func() {
+	/*
+		Release : v1.9
+		Testname: Pods, update
+		Description: Create a Pod with a unique label. Query for the Pod with the label as selector MUST be successful. Update the pod to change the value of the Label. Query for the Pod with the new value for the label MUST be successful.
+	*/
+	framework.ConformanceIt("should be updated [NodeConformance]", func() {
 		By("creating the pod")
 		name := "pod-update-" + string(uuid.NewUUID())
 		value := strconv.Itoa(time.Now().Nanosecond())
@@ -282,7 +297,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:  "nginx",
-						Image: imageutils.GetE2EImage(imageutils.NginxSlim),
+						Image: imageutils.GetE2EImage(imageutils.Nginx),
 					},
 				},
 			},
@@ -315,7 +330,12 @@ var _ = framework.KubeDescribe("Pods", func() {
 		framework.Logf("Pod update OK")
 	})
 
-	It("should allow activeDeadlineSeconds to be updated [Conformance]", func() {
+	/*
+		Release : v1.9
+		Testname: Pods, ActiveDeadlineSeconds
+		Description: Create a Pod with a unique label. Query for the Pod with the label as selector MUST be successful. The Pod is updated with ActiveDeadlineSeconds set on the Pod spec. Pod MUST terminate of the specified time elapses.
+	*/
+	framework.ConformanceIt("should allow activeDeadlineSeconds to be updated [NodeConformance]", func() {
 		By("creating the pod")
 		name := "pod-update-activedeadlineseconds-" + string(uuid.NewUUID())
 		value := strconv.Itoa(time.Now().Nanosecond())
@@ -331,7 +351,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:  "nginx",
-						Image: imageutils.GetE2EImage(imageutils.NginxSlim),
+						Image: imageutils.GetE2EImage(imageutils.Nginx),
 					},
 				},
 			},
@@ -356,7 +376,12 @@ var _ = framework.KubeDescribe("Pods", func() {
 		framework.ExpectNoError(f.WaitForPodTerminated(pod.Name, "DeadlineExceeded"))
 	})
 
-	It("should contain environment variables for services [Conformance]", func() {
+	/*
+		Release : v1.9
+		Testname: Pods, service environment variables
+		Description: Create a server Pod listening on port 9376. A Service called fooservice is created for the server Pod listening on port 8765 targeting port 8080. If a new Pod is created in the cluster then the Pod MUST have the fooservice environment variables available from this new Pod. The new create Pod MUST have environment variables such as FOOSERVICE_SERVICE_HOST, FOOSERVICE_SERVICE_PORT, FOOSERVICE_PORT, FOOSERVICE_PORT_8765_TCP_PORT, FOOSERVICE_PORT_8765_TCP_PROTO, FOOSERVICE_PORT_8765_TCP and FOOSERVICE_PORT_8765_TCP_ADDR that are populated with proper values.
+	*/
+	framework.ConformanceIt("should contain environment variables for services [NodeConformance]", func() {
 		// Make a pod that will be a service.
 		// This pod serves its hostname via HTTP.
 		serverName := "server-envvars-" + string(uuid.NewUUID())
@@ -402,7 +427,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				},
 			},
 		}
-		_, err := f.ClientSet.Core().Services(f.Namespace.Name).Create(svc)
+		_, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(svc)
 		Expect(err).NotTo(HaveOccurred(), "failed to create service")
 
 		// Make a client pod that verifies that it has the service environment variables.
@@ -417,7 +442,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:    containerName,
-						Image:   busyboxImage,
+						Image:   imageutils.GetE2EImage(imageutils.BusyBox),
 						Command: []string{"sh", "-c", "env"},
 					},
 				},
@@ -442,7 +467,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 		}, maxRetries, "Container should have service environment variables set")
 	})
 
-	It("should support remote command execution over websockets", func() {
+	It("should support remote command execution over websockets [NodeConformance]", func() {
 		config, err := framework.LoadConfig()
 		Expect(err).NotTo(HaveOccurred(), "unable to get base config")
 
@@ -456,7 +481,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:    "main",
-						Image:   busyboxImage,
+						Image:   imageutils.GetE2EImage(imageutils.BusyBox),
 						Command: []string{"/bin/sh", "-c", "echo container is alive; sleep 600"},
 					},
 				},
@@ -466,7 +491,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 		By("submitting the pod to kubernetes")
 		pod = podClient.CreateSync(pod)
 
-		req := f.ClientSet.Core().RESTClient().Get().
+		req := f.ClientSet.CoreV1().RESTClient().Get().
 			Namespace(f.Namespace.Name).
 			Resource("pods").
 			Name(pod.Name).
@@ -498,7 +523,13 @@ var _ = framework.KubeDescribe("Pods", func() {
 					continue
 				}
 				if msg[0] != 1 {
-					framework.Failf("Got message from server that didn't start with channel 1 (STDOUT): %v", msg)
+					if len(msg) == 1 {
+						// skip an empty message on stream other than stdout
+						continue
+					} else {
+						framework.Failf("Got message from server that didn't start with channel 1 (STDOUT): %v", msg)
+					}
+
 				}
 				buf.Write(msg[1:])
 			}
@@ -512,7 +543,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 		}, time.Minute, 10*time.Second).Should(BeNil())
 	})
 
-	It("should support retrieving logs from the container over websockets", func() {
+	It("should support retrieving logs from the container over websockets [NodeConformance]", func() {
 		config, err := framework.LoadConfig()
 		Expect(err).NotTo(HaveOccurred(), "unable to get base config")
 
@@ -526,7 +557,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:    "main",
-						Image:   busyboxImage,
+						Image:   imageutils.GetE2EImage(imageutils.BusyBox),
 						Command: []string{"/bin/sh", "-c", "echo container is alive; sleep 10000"},
 					},
 				},
@@ -536,7 +567,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 		By("submitting the pod to kubernetes")
 		podClient.CreateSync(pod)
 
-		req := f.ClientSet.Core().RESTClient().Get().
+		req := f.ClientSet.CoreV1().RESTClient().Get().
 			Namespace(f.Namespace.Name).
 			Resource("pods").
 			Name(pod.Name).
@@ -569,7 +600,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 		}
 	})
 
-	It("should have their auto-restart back-off timer reset on image update [Slow]", func() {
+	It("should have their auto-restart back-off timer reset on image update [Slow][NodeConformance]", func() {
 		podName := "pod-back-off-image"
 		containerName := "back-off"
 		pod := &v1.Pod{
@@ -581,7 +612,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:    containerName,
-						Image:   busyboxImage,
+						Image:   imageutils.GetE2EImage(imageutils.BusyBox),
 						Command: []string{"/bin/sh", "-c", "sleep 5", "/crash/missing"},
 					},
 				},
@@ -592,7 +623,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 
 		By("updating the image")
 		podClient.Update(podName, func(pod *v1.Pod) {
-			pod.Spec.Containers[0].Image = imageutils.GetE2EImage(imageutils.NginxSlim)
+			pod.Spec.Containers[0].Image = imageutils.GetE2EImage(imageutils.Nginx)
 		})
 
 		time.Sleep(syncLoopFrequency)
@@ -610,7 +641,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 	})
 
 	// Slow issue #19027 (20 mins)
-	It("should cap back-off at MaxContainerBackOff [Slow]", func() {
+	It("should cap back-off at MaxContainerBackOff [Slow][NodeConformance]", func() {
 		podName := "back-off-cap"
 		containerName := "back-off-cap"
 		pod := &v1.Pod{
@@ -622,7 +653,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 				Containers: []v1.Container{
 					{
 						Name:    containerName,
-						Image:   busyboxImage,
+						Image:   imageutils.GetE2EImage(imageutils.BusyBox),
 						Command: []string{"/bin/sh", "-c", "sleep 5", "/crash/missing"},
 					},
 				},
@@ -633,7 +664,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 		time.Sleep(2 * kubelet.MaxContainerBackOff) // it takes slightly more than 2*x to get to a back-off of x
 
 		// wait for a delay == capped delay of MaxContainerBackOff
-		By("geting restart delay when capped")
+		By("getting restart delay when capped")
 		var (
 			delay1 time.Duration
 			err    error

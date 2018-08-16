@@ -19,37 +19,112 @@ package uploadconfig
 import (
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
+	core "k8s.io/client-go/testing"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
+	kubeadmscheme "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/scheme"
+	kubeadmapiv1alpha3 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1alpha3"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
 )
 
 func TestUploadConfiguration(t *testing.T) {
 	tests := []struct {
-		name    string
-		cfg     *kubeadmapi.MasterConfiguration
-		wantErr bool
+		name           string
+		errOnCreate    error
+		errOnUpdate    error
+		updateExisting bool
+		errExpected    bool
+		verifyResult   bool
 	}{
 		{
-			"basic validation with correct key",
-			&kubeadmapi.MasterConfiguration{
-				KubernetesVersion: "1.7.3",
-			},
-			false,
+			name:         "basic validation with correct key",
+			verifyResult: true,
+		},
+		{
+			name:           "update existing should report no error",
+			updateExisting: true,
+			verifyResult:   true,
+		},
+		{
+			name:        "unexpected errors for create should be returned",
+			errOnCreate: apierrors.NewUnauthorized(""),
+			errExpected: true,
+		},
+		{
+			name:           "update existing show report error if unexpected error for update is returned",
+			errOnUpdate:    apierrors.NewUnauthorized(""),
+			updateExisting: true,
+			errExpected:    true,
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := clientsetfake.NewSimpleClientset()
-			if err := UploadConfiguration(tt.cfg, client); (err != nil) != tt.wantErr {
-				t.Errorf("UploadConfiguration() error = %v, wantErr %v", err, tt.wantErr)
+		t.Run(tt.name, func(t2 *testing.T) {
+			cfg := &kubeadmapi.InitConfiguration{
+				KubernetesVersion: "v1.10.3",
+				BootstrapTokens: []kubeadmapi.BootstrapToken{
+					{
+						Token: &kubeadmapi.BootstrapTokenString{
+							ID:     "abcdef",
+							Secret: "abcdef0123456789",
+						},
+					},
+				},
+				NodeRegistration: kubeadmapi.NodeRegistrationOptions{
+					Name:      "node-foo",
+					CRISocket: "/var/run/custom-cri.sock",
+				},
 			}
-			masterCfg, err := client.CoreV1().ConfigMaps(metav1.NamespaceSystem).Get(kubeadmconstants.MasterConfigurationConfigMap, metav1.GetOptions{})
-			if err != nil {
-				t.Errorf("Fail to query ConfigMap error = %v", err)
-			} else if masterCfg.Data[kubeadmconstants.MasterConfigurationConfigMapKey] == "" {
-				t.Errorf("Fail to find ConfigMap key = %v", err)
+			client := clientsetfake.NewSimpleClientset()
+			if tt.errOnCreate != nil {
+				client.PrependReactor("create", "configmaps", func(action core.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.errOnCreate
+				})
+			}
+			// For idempotent test, we check the result of the second call.
+			if err := UploadConfiguration(cfg, client); !tt.updateExisting && (err != nil) != tt.errExpected {
+				t2.Fatalf("UploadConfiguration() error = %v, wantErr %v", err, tt.errExpected)
+			}
+			if tt.updateExisting {
+				if tt.errOnUpdate != nil {
+					client.PrependReactor("update", "configmaps", func(action core.Action) (bool, runtime.Object, error) {
+						return true, nil, tt.errOnUpdate
+					})
+				}
+				if err := UploadConfiguration(cfg, client); (err != nil) != tt.errExpected {
+					t2.Fatalf("UploadConfiguration() error = %v", err)
+				}
+			}
+			if tt.verifyResult {
+				masterCfg, err := client.CoreV1().ConfigMaps(metav1.NamespaceSystem).Get(kubeadmconstants.InitConfigurationConfigMap, metav1.GetOptions{})
+				if err != nil {
+					t2.Fatalf("Fail to query ConfigMap error = %v", err)
+				}
+				configData := masterCfg.Data[kubeadmconstants.InitConfigurationConfigMapKey]
+				if configData == "" {
+					t2.Fatalf("Fail to find ConfigMap key")
+				}
+
+				decodedCfg := &kubeadmapi.InitConfiguration{}
+				if err := runtime.DecodeInto(kubeadmscheme.Codecs.UniversalDecoder(), []byte(configData), decodedCfg); err != nil {
+					t2.Fatalf("unable to decode config from bytes: %v", err)
+				}
+
+				if decodedCfg.KubernetesVersion != cfg.KubernetesVersion {
+					t2.Errorf("Decoded value doesn't match, decoded = %#v, expected = %#v", decodedCfg.KubernetesVersion, cfg.KubernetesVersion)
+				}
+
+				// If the decoded cfg has a BootstrapTokens array, verify the sensitive information we had isn't still there.
+				if len(decodedCfg.BootstrapTokens) > 0 && decodedCfg.BootstrapTokens[0].Token != nil && decodedCfg.BootstrapTokens[0].Token.String() == cfg.BootstrapTokens[0].Token.String() {
+					t2.Errorf("Decoded value contains .BootstrapTokens (sensitive info), decoded = %#v, expected = empty", decodedCfg.BootstrapTokens)
+				}
+
+				// Make sure no information from NodeRegistrationOptions was uploaded.
+				if decodedCfg.NodeRegistration.Name == cfg.NodeRegistration.Name || decodedCfg.NodeRegistration.CRISocket != kubeadmapiv1alpha3.DefaultCRISocket {
+					t2.Errorf("Decoded value contains .NodeRegistration (node-specific info shouldn't be uploaded), decoded = %#v, expected = empty", decodedCfg.NodeRegistration)
+				}
 			}
 		})
 	}

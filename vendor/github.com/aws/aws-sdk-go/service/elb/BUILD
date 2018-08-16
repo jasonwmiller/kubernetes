@@ -4,9 +4,13 @@ go_library(
     name = "go_default_library",
     srcs = [
         "api.go",
+        "doc.go",
+        "errors.go",
         "service.go",
         "waiters.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/aws/aws-sdk-go/service/elb",
+    importpath = "github.com/aws/aws-sdk-go/service/elb",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/aws/aws-sdk-go/aws:go_default_library",
@@ -16,7 +20,6 @@ go_library(
         "//vendor/github.com/aws/aws-sdk-go/aws/request:go_default_library",
         "//vendor/github.com/aws/aws-sdk-go/aws/signer/v4:go_default_library",
         "//vendor/github.com/aws/aws-sdk-go/private/protocol/query:go_default_library",
-        "//vendor/github.com/aws/aws-sdk-go/private/waiter:go_default_library",
     ],
 )
 

@@ -17,9 +17,9 @@ limitations under the License.
 package cloud
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/golang/glog"
@@ -34,6 +34,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
+	"k8s.io/kubernetes/pkg/features"
+	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
+	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -41,22 +46,13 @@ import (
 	"k8s.io/client-go/util/workqueue"
 
 	"k8s.io/kubernetes/pkg/cloudprovider"
-	"k8s.io/kubernetes/pkg/cloudprovider/providers/aws"
-	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce"
 	"k8s.io/kubernetes/pkg/controller"
-	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
-	vol "k8s.io/kubernetes/pkg/volume"
 )
 
 const initializerName = "pvlabel.kubernetes.io"
 
 // PersistentVolumeLabelController handles adding labels to persistent volumes when they are created
 type PersistentVolumeLabelController struct {
-	// Control access to cloud volumes
-	mutex            sync.Mutex
-	ebsVolumes       aws.Volumes
-	gceCloudProvider *gce.GCECloud
-
 	cloud         cloudprovider.Interface
 	kubeClient    kubernetes.Interface
 	pvlController cache.Controller
@@ -79,7 +75,7 @@ func NewPersistentVolumeLabelController(
 		kubeClient: kubeClient,
 		queue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "pvLabels"),
 	}
-	pvlc.syncHandler = pvlc.addLabels
+	pvlc.syncHandler = pvlc.addLabelsAndAffinity
 	pvlc.pvlIndexer, pvlc.pvlController = cache.NewIndexerInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
@@ -175,7 +171,7 @@ func (pvlc *PersistentVolumeLabelController) processNextWorkItem() bool {
 
 // AddLabels adds appropriate labels to persistent volumes and sets the
 // volume as available if successful.
-func (pvlc *PersistentVolumeLabelController) addLabels(key string) error {
+func (pvlc *PersistentVolumeLabelController) addLabelsAndAffinity(key string) error {
 	_, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return fmt.Errorf("error getting name of volume %q to get volume from informer: %v", key, err)
@@ -187,118 +183,76 @@ func (pvlc *PersistentVolumeLabelController) addLabels(key string) error {
 		return fmt.Errorf("error getting volume %s from informer: %v", name, err)
 	}
 
-	return pvlc.addLabelsToVolume(volume)
+	return pvlc.addLabelsAndAffinityToVolume(volume)
 }
 
-func (pvlc *PersistentVolumeLabelController) addLabelsToVolume(vol *v1.PersistentVolume) error {
+func (pvlc *PersistentVolumeLabelController) addLabelsAndAffinityToVolume(vol *v1.PersistentVolume) error {
 	var volumeLabels map[string]string
-
-	// Only add labels if in the list of initializers
+	// Only add labels if the next pending initializer.
 	if needsInitialization(vol.Initializers, initializerName) {
-		if vol.Spec.AWSElasticBlockStore != nil {
-			labels, err := pvlc.findAWSEBSLabels(vol)
+		if labeler, ok := (pvlc.cloud).(cloudprovider.PVLabeler); ok {
+			labels, err := labeler.GetLabelsForVolume(context.TODO(), vol)
 			if err != nil {
-				return fmt.Errorf("error querying AWS EBS volume %s: %v", vol.Spec.AWSElasticBlockStore.VolumeID, err)
+				return fmt.Errorf("error querying volume %v: %v", vol.Spec, err)
 			}
 			volumeLabels = labels
-		}
-		if vol.Spec.GCEPersistentDisk != nil {
-			labels, err := pvlc.findGCEPDLabels(vol)
-			if err != nil {
-				return fmt.Errorf("error querying GCE PD volume %s: %v", vol.Spec.GCEPersistentDisk.PDName, err)
-			}
-			volumeLabels = labels
+		} else {
+			glog.V(4).Info("cloud provider does not support PVLabeler")
 		}
 		return pvlc.updateVolume(vol, volumeLabels)
 	}
-
 	return nil
-}
-
-func (pvlc *PersistentVolumeLabelController) findAWSEBSLabels(volume *v1.PersistentVolume) (map[string]string, error) {
-	// Ignore any volumes that are being provisioned
-	if volume.Spec.AWSElasticBlockStore.VolumeID == vol.ProvisionedVolumeName {
-		return nil, nil
-	}
-	ebsVolumes, err := pvlc.getEBSVolumes()
-	if err != nil {
-		return nil, err
-	}
-
-	// TODO: GetVolumeLabels is actually a method on the Volumes interface
-	// If that gets standardized we can refactor to reduce code duplication
-	spec := aws.KubernetesVolumeID(volume.Spec.AWSElasticBlockStore.VolumeID)
-	labels, err := ebsVolumes.GetVolumeLabels(spec)
-	if err != nil {
-		return nil, err
-	}
-
-	return labels, nil
-}
-
-// getEBSVolumes returns the AWS Volumes interface for ebs
-func (pvlc *PersistentVolumeLabelController) getEBSVolumes() (aws.Volumes, error) {
-	pvlc.mutex.Lock()
-	defer pvlc.mutex.Unlock()
-
-	if pvlc.ebsVolumes == nil {
-		awsCloudProvider := pvlc.cloud.(*aws.Cloud)
-		awsCloudProvider, ok := pvlc.cloud.(*aws.Cloud)
-		if !ok {
-			// GetCloudProvider has gone very wrong
-			return nil, fmt.Errorf("error retrieving AWS cloud provider")
-		}
-		pvlc.ebsVolumes = awsCloudProvider
-	}
-	return pvlc.ebsVolumes, nil
-}
-
-func (pvlc *PersistentVolumeLabelController) findGCEPDLabels(volume *v1.PersistentVolume) (map[string]string, error) {
-	// Ignore any volumes that are being provisioned
-	if volume.Spec.GCEPersistentDisk.PDName == vol.ProvisionedVolumeName {
-		return nil, nil
-	}
-
-	provider, err := pvlc.getGCECloudProvider()
-	if err != nil {
-		return nil, err
-	}
-
-	// If the zone is already labeled, honor the hint
-	zone := volume.Labels[kubeletapis.LabelZoneFailureDomain]
-
-	labels, err := provider.GetAutoLabelsForPD(volume.Spec.GCEPersistentDisk.PDName, zone)
-	if err != nil {
-		return nil, err
-	}
-
-	return labels, nil
-}
-
-// getGCECloudProvider returns the GCE cloud provider, for use for querying volume labels
-func (pvlc *PersistentVolumeLabelController) getGCECloudProvider() (*gce.GCECloud, error) {
-	pvlc.mutex.Lock()
-	defer pvlc.mutex.Unlock()
-
-	if pvlc.gceCloudProvider == nil {
-		gceCloudProvider, ok := pvlc.cloud.(*gce.GCECloud)
-		if !ok {
-			// GetCloudProvider has gone very wrong
-			return nil, fmt.Errorf("error retrieving GCE cloud provider")
-		}
-		pvlc.gceCloudProvider = gceCloudProvider
-	}
-	return pvlc.gceCloudProvider, nil
 }
 
 func (pvlc *PersistentVolumeLabelController) createPatch(vol *v1.PersistentVolume, volLabels map[string]string) ([]byte, error) {
 	volName := vol.Name
 	newVolume := vol.DeepCopyObject().(*v1.PersistentVolume)
+	populateAffinity := utilfeature.DefaultFeatureGate.Enabled(features.VolumeScheduling) && len(volLabels) != 0
+
 	if newVolume.Labels == nil {
 		newVolume.Labels = make(map[string]string)
 	}
+
+	requirements := make([]v1.NodeSelectorRequirement, 0)
 	for k, v := range volLabels {
 		newVolume.Labels[k] = v
+		// Set NodeSelectorRequirements based on the labels
+		if populateAffinity {
+			var values []string
+			if k == kubeletapis.LabelZoneFailureDomain {
+				zones, err := volumeutil.LabelZonesToSet(v)
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert label string for Zone: %s to a Set", v)
+				}
+				values = zones.List()
+			} else {
+				values = []string{v}
+			}
+			requirements = append(requirements, v1.NodeSelectorRequirement{Key: k, Operator: v1.NodeSelectorOpIn, Values: values})
+		}
+	}
+	if populateAffinity {
+		if newVolume.Spec.NodeAffinity == nil {
+			newVolume.Spec.NodeAffinity = new(v1.VolumeNodeAffinity)
+		}
+		if newVolume.Spec.NodeAffinity.Required == nil {
+			newVolume.Spec.NodeAffinity.Required = new(v1.NodeSelector)
+		}
+		if len(newVolume.Spec.NodeAffinity.Required.NodeSelectorTerms) == 0 {
+			// Need atleast one term pre-allocated whose MatchExpressions can be appended to
+			newVolume.Spec.NodeAffinity.Required.NodeSelectorTerms = make([]v1.NodeSelectorTerm, 1)
+		}
+		// Populate NodeAffinity with requirements if there are no conflicting keys found
+		if v1helper.NodeSelectorRequirementKeysExistInNodeSelectorTerms(requirements, newVolume.Spec.NodeAffinity.Required.NodeSelectorTerms) {
+			glog.V(4).Infof("NodeSelectorRequirements for cloud labels %v conflict with existing NodeAffinity %v. Skipping addition of NodeSelectorRequirements for cloud labels.",
+				requirements, newVolume.Spec.NodeAffinity)
+		} else {
+			for _, req := range requirements {
+				for i := range newVolume.Spec.NodeAffinity.Required.NodeSelectorTerms {
+					newVolume.Spec.NodeAffinity.Required.NodeSelectorTerms[i].MatchExpressions = append(newVolume.Spec.NodeAffinity.Required.NodeSelectorTerms[i].MatchExpressions, req)
+				}
+			}
+		}
 	}
 	newVolume.Initializers = removeInitializer(newVolume.Initializers, initializerName)
 	glog.V(4).Infof("removed initializer on PersistentVolume %s", newVolume.Name)
@@ -328,13 +282,13 @@ func (pvlc *PersistentVolumeLabelController) updateVolume(vol *v1.PersistentVolu
 		return err
 	}
 
-	_, err = pvlc.kubeClient.Core().PersistentVolumes().Patch(string(volName), types.StrategicMergePatchType, patchBytes)
+	_, err = pvlc.kubeClient.CoreV1().PersistentVolumes().Patch(string(volName), types.StrategicMergePatchType, patchBytes)
 	if err != nil {
 		return fmt.Errorf("failed to update PersistentVolume %s: %v", volName, err)
 	}
 	glog.V(4).Infof("updated PersistentVolume %s", volName)
 
-	return err
+	return nil
 }
 
 func removeInitializer(initializers *metav1.Initializers, name string) *metav1.Initializers {
@@ -358,16 +312,17 @@ func removeInitializer(initializers *metav1.Initializers, name string) *metav1.I
 	return &metav1.Initializers{Pending: updated}
 }
 
+// needsInitialization checks whether or not the PVL is the next pending initializer.
 func needsInitialization(initializers *metav1.Initializers, name string) bool {
-	hasInitializer := false
-
-	if initializers != nil {
-		for _, pending := range initializers.Pending {
-			if pending.Name == name {
-				hasInitializer = true
-				break
-			}
-		}
+	if initializers == nil {
+		return false
 	}
-	return hasInitializer
+
+	if len(initializers.Pending) == 0 {
+		return false
+	}
+
+	// There is at least one initializer still pending so check to
+	// see if the PVL is the next in line.
+	return initializers.Pending[0].Name == name
 }

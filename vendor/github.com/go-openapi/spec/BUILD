@@ -25,6 +25,8 @@ go_library(
         "tag.go",
         "xml_object.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/go-openapi/spec",
+    importpath = "github.com/go-openapi/spec",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/go-openapi/jsonpointer:go_default_library",

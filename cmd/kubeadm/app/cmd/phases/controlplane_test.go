@@ -21,16 +21,13 @@ import (
 	"os"
 	"testing"
 
-	// required for triggering api machinery startup when running unit tests
-	_ "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/install"
-
 	testutil "k8s.io/kubernetes/cmd/kubeadm/test"
 	cmdtestutil "k8s.io/kubernetes/cmd/kubeadm/test/cmd"
 )
 
 func TestControlPlaneSubCommandsHasFlags(t *testing.T) {
 
-	subCmds := getControlPlaneSubCommands("")
+	subCmds := getControlPlaneSubCommands("", phaseTestK8sVersion)
 
 	commonFlags := []string{
 		"cert-dir",
@@ -49,6 +46,7 @@ func TestControlPlaneSubCommandsHasFlags(t *testing.T) {
 				"apiserver-bind-port",
 				"service-cidr",
 				"pod-network-cidr",
+				"feature-gates",
 			},
 		},
 		{
@@ -58,6 +56,7 @@ func TestControlPlaneSubCommandsHasFlags(t *testing.T) {
 				"apiserver-advertise-address",
 				"apiserver-bind-port",
 				"service-cidr",
+				"feature-gates",
 			},
 		},
 		{
@@ -91,7 +90,7 @@ func TestControlPlaneCreateFilesWithFlags(t *testing.T) {
 		{
 			command: "all",
 			additionalFlags: []string{
-				"--kubernetes-version=v1.7.0",
+				"--kubernetes-version=v1.10.0",
 				"--apiserver-advertise-address=1.2.3.4",
 				"--apiserver-bind-port=6443",
 				"--service-cidr=1.2.3.4/16",
@@ -106,7 +105,7 @@ func TestControlPlaneCreateFilesWithFlags(t *testing.T) {
 		{
 			command: "apiserver",
 			additionalFlags: []string{
-				"--kubernetes-version=v1.7.0",
+				"--kubernetes-version=v1.10.0",
 				"--apiserver-advertise-address=1.2.3.4",
 				"--apiserver-bind-port=6443",
 				"--service-cidr=1.2.3.4/16",
@@ -116,7 +115,7 @@ func TestControlPlaneCreateFilesWithFlags(t *testing.T) {
 		{
 			command: "controller-manager",
 			additionalFlags: []string{
-				"--kubernetes-version=v1.7.0",
+				"--kubernetes-version=v1.10.0",
 				"--pod-network-cidr=1.2.3.4/16",
 			},
 			expectedFiles: []string{"kube-controller-manager.yaml"},
@@ -124,7 +123,7 @@ func TestControlPlaneCreateFilesWithFlags(t *testing.T) {
 		{
 			command: "scheduler",
 			additionalFlags: []string{
-				"--kubernetes-version=v1.7.0",
+				"--kubernetes-version=v1.10.0",
 			},
 			expectedFiles: []string{"kube-scheduler.yaml"},
 		},
@@ -137,7 +136,7 @@ func TestControlPlaneCreateFilesWithFlags(t *testing.T) {
 		defer os.RemoveAll(tmpdir)
 
 		// Get subcommands working in the temporary directory
-		subCmds := getControlPlaneSubCommands(tmpdir)
+		subCmds := getControlPlaneSubCommands(tmpdir, phaseTestK8sVersion)
 
 		// Execute the subcommand
 		certDirFlag := fmt.Sprintf("--cert-dir=%s", tmpdir)

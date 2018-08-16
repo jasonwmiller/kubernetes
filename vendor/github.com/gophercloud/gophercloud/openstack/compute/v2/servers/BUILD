@@ -10,6 +10,8 @@ go_library(
         "urls.go",
         "util.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/gophercloud/gophercloud/openstack/compute/v2/servers",
+    importpath = "github.com/gophercloud/gophercloud/openstack/compute/v2/servers",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/gophercloud/gophercloud:go_default_library",

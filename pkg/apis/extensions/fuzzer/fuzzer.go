@@ -30,6 +30,17 @@ import (
 // Funcs returns the fuzzer functions for the extensions api group.
 var Funcs = func(codecs runtimeserializer.CodecFactory) []interface{} {
 	return []interface{}{
+		func(j *extensions.Deployment, c fuzz.Continue) {
+			c.FuzzNoCustom(j)
+
+			// match defaulting
+			if j.Spec.Selector == nil {
+				j.Spec.Selector = &metav1.LabelSelector{MatchLabels: j.Spec.Template.Labels}
+			}
+			if len(j.Labels) == 0 {
+				j.Labels = j.Spec.Template.Labels
+			}
+		},
 		func(j *extensions.DeploymentSpec, c fuzz.Continue) {
 			c.FuzzNoCustom(j) // fuzz self without calling this function again
 			rhl := int32(c.Rand.Int31())
@@ -55,30 +66,13 @@ var Funcs = func(codecs runtimeserializer.CodecFactory) []interface{} {
 				j.RollingUpdate = &rollingUpdate
 			}
 		},
-		func(psp *extensions.PodSecurityPolicySpec, c fuzz.Continue) {
-			c.FuzzNoCustom(psp) // fuzz self without calling this function again
-			runAsUserRules := []extensions.RunAsUserStrategy{extensions.RunAsUserStrategyMustRunAsNonRoot, extensions.RunAsUserStrategyMustRunAs, extensions.RunAsUserStrategyRunAsAny}
-			psp.RunAsUser.Rule = runAsUserRules[c.Rand.Intn(len(runAsUserRules))]
-			seLinuxRules := []extensions.SELinuxStrategy{extensions.SELinuxStrategyRunAsAny, extensions.SELinuxStrategyMustRunAs}
-			psp.SELinux.Rule = seLinuxRules[c.Rand.Intn(len(seLinuxRules))]
-		},
-		func(s *extensions.Scale, c fuzz.Continue) {
-			c.FuzzNoCustom(s) // fuzz self without calling this function again
-			// TODO: Implement a fuzzer to generate valid keys, values and operators for
-			// selector requirements.
-			if s.Status.Selector != nil {
-				s.Status.Selector = &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"testlabelkey": "testlabelval",
-					},
-					MatchExpressions: []metav1.LabelSelectorRequirement{
-						{
-							Key:      "testkey",
-							Operator: metav1.LabelSelectorOpIn,
-							Values:   []string{"val1", "val2", "val3"},
-						},
-					},
-				}
+		func(j *extensions.DaemonSet, c fuzz.Continue) {
+			c.FuzzNoCustom(j)
+
+			// match defaulter
+			j.Spec.Template.Generation = 0
+			if len(j.ObjectMeta.Labels) == 0 {
+				j.ObjectMeta.Labels = j.Spec.Template.ObjectMeta.Labels
 			}
 		},
 		func(j *extensions.DaemonSetSpec, c fuzz.Continue) {
@@ -103,6 +97,17 @@ var Funcs = func(codecs runtimeserializer.CodecFactory) []interface{} {
 					}
 				}
 				j.RollingUpdate = &rollingUpdate
+			}
+		},
+		func(j *extensions.ReplicaSet, c fuzz.Continue) {
+			c.FuzzNoCustom(j)
+
+			// match defaulter
+			if j.Spec.Selector == nil {
+				j.Spec.Selector = &metav1.LabelSelector{MatchLabels: j.Spec.Template.Labels}
+			}
+			if len(j.Labels) == 0 {
+				j.Labels = j.Spec.Template.Labels
 			}
 		},
 	}

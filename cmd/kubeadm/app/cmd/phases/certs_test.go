@@ -21,9 +21,6 @@ import (
 	"os"
 	"testing"
 
-	// required for triggering api machinery startup when running unit tests
-	_ "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/install"
-
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	"k8s.io/kubernetes/cmd/kubeadm/app/phases/certs/pkiutil"
@@ -33,9 +30,12 @@ import (
 	cmdtestutil "k8s.io/kubernetes/cmd/kubeadm/test/cmd"
 )
 
+// phaseTestK8sVersion is a fake kubernetes version to use when testing
+const phaseTestK8sVersion = "v1.10.0"
+
 func TestCertsSubCommandsHasFlags(t *testing.T) {
 
-	subCmds := getCertsSubCommands()
+	subCmds := getCertsSubCommands(phaseTestK8sVersion)
 
 	commonFlags := []string{
 		"cert-dir",
@@ -71,6 +71,21 @@ func TestCertsSubCommandsHasFlags(t *testing.T) {
 			command: "apiserver-kubelet-client",
 		},
 		{
+			command: "etcd-ca",
+		},
+		{
+			command: "etcd-server",
+		},
+		{
+			command: "etcd-peer",
+		},
+		{
+			command: "etcd-healthcheck-client",
+		},
+		{
+			command: "apiserver-etcd-client",
+		},
+		{
 			command: "sa",
 		},
 		{
@@ -89,7 +104,7 @@ func TestCertsSubCommandsHasFlags(t *testing.T) {
 
 func TestSubCmdCertsCreateFilesWithFlags(t *testing.T) {
 
-	subCmds := getCertsSubCommands()
+	subCmds := getCertsSubCommands(phaseTestK8sVersion)
 
 	var tests = []struct {
 		subCmds       []string
@@ -109,6 +124,16 @@ func TestSubCmdCertsCreateFilesWithFlags(t *testing.T) {
 		{
 			subCmds:       []string{"ca", "apiserver", "apiserver-kubelet-client"},
 			expectedFiles: []string{kubeadmconstants.CACertName, kubeadmconstants.CAKeyName, kubeadmconstants.APIServerCertName, kubeadmconstants.APIServerKeyName, kubeadmconstants.APIServerKubeletClientCertName, kubeadmconstants.APIServerKubeletClientKeyName},
+		},
+		{
+			subCmds: []string{"etcd-ca", "etcd-server", "etcd-peer", "etcd-healthcheck-client", "apiserver-etcd-client"},
+			expectedFiles: []string{
+				kubeadmconstants.EtcdCACertName, kubeadmconstants.EtcdCAKeyName,
+				kubeadmconstants.EtcdServerCertName, kubeadmconstants.EtcdServerKeyName,
+				kubeadmconstants.EtcdPeerCertName, kubeadmconstants.EtcdPeerKeyName,
+				kubeadmconstants.EtcdHealthcheckClientCertName, kubeadmconstants.EtcdHealthcheckClientKeyName,
+				kubeadmconstants.APIServerEtcdClientCertName, kubeadmconstants.APIServerEtcdClientKeyName,
+			},
 		},
 		{
 			subCmds:       []string{"sa"},
@@ -138,7 +163,7 @@ func TestSubCmdCertsCreateFilesWithFlags(t *testing.T) {
 
 func TestSubCmdCertsApiServerForwardsFlags(t *testing.T) {
 
-	subCmds := getCertsSubCommands()
+	subCmds := getCertsSubCommands(phaseTestK8sVersion)
 
 	// Create temp folder for the test case
 	tmpdir := testutil.SetupTempDir(t)
@@ -164,7 +189,10 @@ func TestSubCmdCertsApiServerForwardsFlags(t *testing.T) {
 		t.Fatalf("Error loading API server certificate: %v", err)
 	}
 
-	hostname := node.GetHostname("")
+	hostname, err := node.GetHostname("")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for i, name := range []string{hostname, "kubernetes", "kubernetes.default", "kubernetes.default.svc", "kubernetes.default.svc.mycluster.local"} {
 		if APIserverCert.DNSNames[i] != name {
@@ -180,7 +208,7 @@ func TestSubCmdCertsApiServerForwardsFlags(t *testing.T) {
 
 func TestSubCmdCertsCreateFilesWithConfigFile(t *testing.T) {
 
-	subCmds := getCertsSubCommands()
+	subCmds := getCertsSubCommands(phaseTestK8sVersion)
 
 	var tests = []struct {
 		subCmds       []string
@@ -202,6 +230,16 @@ func TestSubCmdCertsCreateFilesWithConfigFile(t *testing.T) {
 			expectedFiles: []string{kubeadmconstants.CACertName, kubeadmconstants.CAKeyName, kubeadmconstants.APIServerCertName, kubeadmconstants.APIServerKeyName, kubeadmconstants.APIServerKubeletClientCertName, kubeadmconstants.APIServerKubeletClientKeyName},
 		},
 		{
+			subCmds: []string{"etcd-ca", "etcd-server", "etcd-peer", "etcd-healthcheck-client", "apiserver-etcd-client"},
+			expectedFiles: []string{
+				kubeadmconstants.EtcdCACertName, kubeadmconstants.EtcdCAKeyName,
+				kubeadmconstants.EtcdServerCertName, kubeadmconstants.EtcdServerKeyName,
+				kubeadmconstants.EtcdPeerCertName, kubeadmconstants.EtcdPeerKeyName,
+				kubeadmconstants.EtcdHealthcheckClientCertName, kubeadmconstants.EtcdHealthcheckClientKeyName,
+				kubeadmconstants.APIServerEtcdClientCertName, kubeadmconstants.APIServerEtcdClientKeyName,
+			},
+		},
+		{
 			subCmds:       []string{"front-proxy-ca", "front-proxy-client"},
 			expectedFiles: []string{kubeadmconstants.FrontProxyCACertName, kubeadmconstants.FrontProxyCAKeyName, kubeadmconstants.FrontProxyClientCertName, kubeadmconstants.FrontProxyClientKeyName},
 		},
@@ -218,12 +256,12 @@ func TestSubCmdCertsCreateFilesWithConfigFile(t *testing.T) {
 
 		certdir := tmpdir
 
-		cfg := &kubeadmapi.MasterConfiguration{
-			API:             kubeadmapi.API{AdvertiseAddress: "1.2.3.4", BindPort: 1234},
-			CertificatesDir: certdir,
-			NodeName:        "valid-node-name",
+		cfg := &kubeadmapi.InitConfiguration{
+			API:              kubeadmapi.API{AdvertiseAddress: "1.2.3.4", BindPort: 1234},
+			CertificatesDir:  certdir,
+			NodeRegistration: kubeadmapi.NodeRegistrationOptions{Name: "valid-node-name"},
 		}
-		configPath := testutil.SetupMasterConfigurationFile(t, tmpdir, cfg)
+		configPath := testutil.SetupInitConfigurationFile(t, tmpdir, cfg)
 
 		// executes given sub commands
 		for _, subCmdName := range test.subCmds {

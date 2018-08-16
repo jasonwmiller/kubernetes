@@ -19,9 +19,6 @@ package phases
 import (
 	"testing"
 
-	// required for triggering api machinery startup when running unit tests
-	_ "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/install"
-
 	cmdtestutil "k8s.io/kubernetes/cmd/kubeadm/test/cmd"
 )
 
@@ -47,6 +44,7 @@ func TestAddonsSubCommandsHasFlags(t *testing.T) {
 				"apiserver-bind-port",
 				"pod-network-cidr",
 				"service-dns-domain",
+				"service-cidr",
 			},
 		},
 		{
@@ -58,9 +56,10 @@ func TestAddonsSubCommandsHasFlags(t *testing.T) {
 			},
 		},
 		{
-			command: "kube-dns",
+			command: "coredns",
 			additionalFlags: []string{
 				"service-dns-domain",
+				"service-cidr",
 			},
 		},
 	}

@@ -24,11 +24,27 @@ source "${KUBE_ROOT}/hack/lib/init.sh"
 # TODO(spxtr): Remove this line once Bazel is the only way to build.
 rm -f "${KUBE_ROOT}/pkg/generated/openapi/zz_generated.openapi.go"
 
-# The git commit sha1s here should match the values in $KUBE_ROOT/WORKSPACE.
-kube::util::go_install_from_commit github.com/kubernetes/repo-infra/kazel 4eaf9e671bbb549fb4ec292cf251f921d7ef80ac
-kube::util::go_install_from_commit github.com/bazelbuild/rules_go/go/tools/gazelle/gazelle 82483596ec203eb9c1849937636f4cbed83733eb
+# Ensure that we find the binaries we build before anything else.
+export GOBIN="${KUBE_OUTPUT_BINPATH}"
+PATH="${GOBIN}:${PATH}"
+
+# Install tools we need, but only from vendor/...
+go install k8s.io/kubernetes/vendor/github.com/bazelbuild/bazel-gazelle/cmd/gazelle
+go install k8s.io/kubernetes/vendor/github.com/kubernetes/repo-infra/kazel
 
 touch "${KUBE_ROOT}/vendor/BUILD"
+# Ensure that we use the correct importmap for all vendored dependencies.
+# Probably not necessary in gazelle 0.13+
+# (https://github.com/bazelbuild/bazel-gazelle/pull/207).
+if ! grep -q "# gazelle:importmap_prefix" "${KUBE_ROOT}/vendor/BUILD"; then
+  echo "# gazelle:importmap_prefix k8s.io/kubernetes/vendor" >> "${KUBE_ROOT}/vendor/BUILD"
+fi
 
-gazelle fix -build_file_name=BUILD,BUILD.bazel -external=vendored -mode=fix -repo_root="$(kube::realpath ${KUBE_ROOT})"
-kazel -root="$(kube::realpath ${KUBE_ROOT})"
+gazelle fix \
+    -build_file_name=BUILD,BUILD.bazel \
+    -external=vendored \
+    -mode=fix \
+    -repo_root "${KUBE_ROOT}" \
+    "${KUBE_ROOT}"
+
+kazel

@@ -6,8 +6,12 @@ go_library(
         "config.go",
         "seccomp_unsupported.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/opencontainers/runc/libcontainer/seccomp",
+    importpath = "github.com/opencontainers/runc/libcontainer/seccomp",
     visibility = ["//visibility:public"],
-    deps = ["//vendor/github.com/opencontainers/runc/libcontainer/configs:go_default_library"],
+    deps = [
+        "//vendor/github.com/opencontainers/runc/libcontainer/configs:go_default_library",
+    ],
 )
 
 filegroup(

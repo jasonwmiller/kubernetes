@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/httpstream/spdy"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/kubernetes/pkg/api"
+	api "k8s.io/kubernetes/pkg/apis/core"
 
 	"github.com/golang/glog"
 )
@@ -46,7 +46,7 @@ func handleHttpStreams(req *http.Request, w http.ResponseWriter, portForwarder P
 	upgrader := spdy.NewResponseUpgrader()
 	conn := upgrader.UpgradeResponse(w, req, httpStreamReceived(streamChan))
 	if conn == nil {
-		return errors.New("Unable to upgrade websocket connection")
+		return errors.New("Unable to upgrade httpstream connection")
 	}
 	defer conn.Close()
 

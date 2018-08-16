@@ -23,15 +23,15 @@ import (
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/test/e2e/framework"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	. "github.com/onsi/ginkgo"
 )
 
 //TODO : Consolidate this code with the code for emptyDir.
 //This will require some smart.
-var _ = framework.KubeDescribe("HostPath", func() {
+var _ = Describe("[sig-storage] HostPath", func() {
 	f := framework.NewDefaultFramework("hostpath")
 
 	BeforeEach(func() {
@@ -40,7 +40,12 @@ var _ = framework.KubeDescribe("HostPath", func() {
 		_ = os.Remove("/tmp/test-file")
 	})
 
-	It("should give a volume the correct mode [Conformance] [sig-storage]", func() {
+	/*
+	   Release : v1.9
+	   Testname: Host path, volume mode default
+	   Description: Create a Pod with host volume mounted. The volume mounted MUST be a directory with permissions mode -rwxrwxrwx and that is has the sticky bit (mode flag t) set.
+	*/
+	framework.ConformanceIt("should give a volume the correct mode [NodeConformance]", func() {
 		source := &v1.HostPathVolumeSource{
 			Path: "/tmp",
 		}
@@ -51,12 +56,12 @@ var _ = framework.KubeDescribe("HostPath", func() {
 			fmt.Sprintf("--file_mode=%v", volumePath),
 		}
 		f.TestContainerOutput("hostPath mode", pod, 0, []string{
-			"mode of file \"/test-volume\": dtrwxrwxrwx", // we expect the sticky bit (mode flag t) to be set for the dir
+			"mode of file \"/test-volume\": dtrwxrwx", // we expect the sticky bit (mode flag t) to be set for the dir
 		})
 	})
 
 	// This test requires mounting a folder into a container with write privileges.
-	It("should support r/w [sig-storage]", func() {
+	It("should support r/w [NodeConformance]", func() {
 		filePath := path.Join(volumePath, "test-file")
 		retryDuration := 180
 		source := &v1.HostPathVolumeSource{
@@ -80,7 +85,7 @@ var _ = framework.KubeDescribe("HostPath", func() {
 		})
 	})
 
-	It("should support subPath [sig-storage]", func() {
+	It("should support subPath [NodeConformance]", func() {
 		subPath := "sub-path"
 		fileName := "test-file"
 		retryDuration := 180
@@ -112,7 +117,7 @@ var _ = framework.KubeDescribe("HostPath", func() {
 		})
 	})
 
-	It("should support existing directory subPath [sig-storage]", func() {
+	It("should support existing directory subPath", func() {
 		framework.SkipUnlessSSHKeyPresent()
 
 		subPath := "sub-path"
@@ -131,7 +136,9 @@ var _ = framework.KubeDescribe("HostPath", func() {
 
 		// Create the subPath directory on the host
 		existing := path.Join(source.Path, subPath)
-		result, err := framework.SSH(fmt.Sprintf("mkdir -p %s", existing), framework.GetNodeExternalIP(&nodeList.Items[0]), framework.TestContext.Provider)
+		externalIP, err := framework.GetNodeExternalIP(&nodeList.Items[0])
+		framework.ExpectNoError(err)
+		result, err := framework.SSH(fmt.Sprintf("mkdir -p %s", existing), externalIP, framework.TestContext.Provider)
 		framework.LogSSHResult(result)
 		framework.ExpectNoError(err)
 		if result.Code != 0 {
@@ -158,7 +165,7 @@ var _ = framework.KubeDescribe("HostPath", func() {
 	})
 
 	// TODO consolidate common code of this test and above
-	It("should support existing single file subPath [sig-storage]", func() {
+	It("should support existing single file subPath", func() {
 		framework.SkipUnlessSSHKeyPresent()
 
 		subPath := "sub-path-test-file"
@@ -175,7 +182,9 @@ var _ = framework.KubeDescribe("HostPath", func() {
 
 		// Create the subPath file on the host
 		existing := path.Join(source.Path, subPath)
-		result, err := framework.SSH(fmt.Sprintf("echo \"mount-tester new file\" > %s", existing), framework.GetNodeExternalIP(&nodeList.Items[0]), framework.TestContext.Provider)
+		externalIP, err := framework.GetNodeExternalIP(&nodeList.Items[0])
+		framework.ExpectNoError(err)
+		result, err := framework.SSH(fmt.Sprintf("echo \"mount-tester new file\" > %s", existing), externalIP, framework.TestContext.Provider)
 		framework.LogSSHResult(result)
 		framework.ExpectNoError(err)
 		if result.Code != 0 {
@@ -222,7 +231,7 @@ func testPodWithHostVol(path string, source *v1.HostPathVolumeSource) *v1.Pod {
 	return &v1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
-			APIVersion: testapi.Groups[v1.GroupName].GroupVersion().String(),
+			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: podName,
@@ -231,7 +240,7 @@ func testPodWithHostVol(path string, source *v1.HostPathVolumeSource) *v1.Pod {
 			Containers: []v1.Container{
 				{
 					Name:  containerName1,
-					Image: mountImage,
+					Image: imageutils.GetE2EImage(imageutils.Mounttest),
 					VolumeMounts: []v1.VolumeMount{
 						{
 							Name:      volumeName,
@@ -244,7 +253,7 @@ func testPodWithHostVol(path string, source *v1.HostPathVolumeSource) *v1.Pod {
 				},
 				{
 					Name:  containerName2,
-					Image: mountImage,
+					Image: imageutils.GetE2EImage(imageutils.Mounttest),
 					VolumeMounts: []v1.VolumeMount{
 						{
 							Name:      volumeName,

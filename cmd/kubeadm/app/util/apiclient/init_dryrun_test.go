@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	rbac "k8s.io/api/rbac/v1beta1"
+	rbac "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	core "k8s.io/client-go/testing"
 )
@@ -46,7 +46,7 @@ func TestHandleGetAction(t *testing.T) {
 		{
 			action:             core.NewRootGetAction(schema.GroupVersionResource{Version: "v1", Resource: "nodes"}, masterName),
 			expectedHandled:    true,
-			expectedObjectJSON: []byte(`{"metadata":{"name":"master-foo","creationTimestamp":null,"labels":{"kubernetes.io/hostname":"master-foo"}},"spec":{"externalID":"master-foo"},"status":{"daemonEndpoints":{"kubeletEndpoint":{"Port":0}},"nodeInfo":{"machineID":"","systemUUID":"","bootID":"","kernelVersion":"","osImage":"","containerRuntimeVersion":"","kubeletVersion":"","kubeProxyVersion":"","operatingSystem":"","architecture":""}}}`),
+			expectedObjectJSON: []byte(`{"metadata":{"name":"master-foo","creationTimestamp":null,"labels":{"kubernetes.io/hostname":"master-foo"}},"spec":{},"status":{"daemonEndpoints":{"kubeletEndpoint":{"Port":0}},"nodeInfo":{"machineID":"","systemUUID":"","bootID":"","kernelVersion":"","osImage":"","containerRuntimeVersion":"","kubeletVersion":"","kubeProxyVersion":"","operatingSystem":"","architecture":""}}}`),
 			expectedErr:        false,
 		},
 		{

@@ -522,7 +522,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -696,7 +696,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -850,8 +850,18 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </thead>
 <tbody>
 <tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">202</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Accepted</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrolebinding">v1beta1.ClusterRoleBinding</a></p></td>
+</tr>
+<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">200</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrolebinding">v1beta1.ClusterRoleBinding</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">201</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Created</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrolebinding">v1beta1.ClusterRoleBinding</a></p></td>
 </tr>
 </tbody>
@@ -1084,6 +1094,11 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrolebinding">v1beta1.ClusterRoleBinding</a></p></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">201</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Created</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrolebinding">v1beta1.ClusterRoleBinding</a></p></td>
+</tr>
 </tbody>
 </table>
 
@@ -1189,7 +1204,15 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">propagationPolicy</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Whether and how garbage collection will be performed. Either this field or OrphanDependents may be set, but not both. The default policy is decided by the existing finalizer set in the metadata.finalizers and the resource-specific default policy.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Whether and how garbage collection will be performed. Either this field or OrphanDependents may be set, but not both. The default policy is decided by the existing finalizer set in the metadata.finalizers and the resource-specific default policy. Acceptable values are: <em>Orphan</em> - orphan the dependents; <em>Background</em> - allow the garbage collector to delete the dependents in the background; <em>Foreground</em> - a cascading policy that deletes all dependents in the foreground.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">dryRun</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">When present, indicates that modifications should not be persisted. An invalid or unrecognized dryRun directive will result in an error response and no further processing of the request. Valid values are: - All: all dry run stages will be processed</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -1222,6 +1245,11 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </tr>
 </thead>
 <tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">202</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Accepted</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1_status">v1.Status</a></p></td>
+</tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">200</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
@@ -1473,7 +1501,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -1647,7 +1675,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -1801,8 +1829,18 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </thead>
 <tbody>
 <tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">202</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Accepted</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrole">v1beta1.ClusterRole</a></p></td>
+</tr>
+<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">200</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrole">v1beta1.ClusterRole</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">201</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Created</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrole">v1beta1.ClusterRole</a></p></td>
 </tr>
 </tbody>
@@ -2035,6 +2073,11 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrole">v1beta1.ClusterRole</a></p></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">201</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Created</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_clusterrole">v1beta1.ClusterRole</a></p></td>
+</tr>
 </tbody>
 </table>
 
@@ -2140,7 +2183,15 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">propagationPolicy</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Whether and how garbage collection will be performed. Either this field or OrphanDependents may be set, but not both. The default policy is decided by the existing finalizer set in the metadata.finalizers and the resource-specific default policy.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Whether and how garbage collection will be performed. Either this field or OrphanDependents may be set, but not both. The default policy is decided by the existing finalizer set in the metadata.finalizers and the resource-specific default policy. Acceptable values are: <em>Orphan</em> - orphan the dependents; <em>Background</em> - allow the garbage collector to delete the dependents in the background; <em>Foreground</em> - a cascading policy that deletes all dependents in the foreground.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">dryRun</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">When present, indicates that modifications should not be persisted. An invalid or unrecognized dryRun directive will result in an error response and no further processing of the request. Valid values are: - All: all dry run stages will be processed</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -2173,6 +2224,11 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </tr>
 </thead>
 <tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">202</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Accepted</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1_status">v1.Status</a></p></td>
+</tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">200</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
@@ -2424,7 +2480,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -2606,7 +2662,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -2776,8 +2832,18 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </thead>
 <tbody>
 <tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">202</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Accepted</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_rolebinding">v1beta1.RoleBinding</a></p></td>
+</tr>
+<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">200</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_rolebinding">v1beta1.RoleBinding</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">201</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Created</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_rolebinding">v1beta1.RoleBinding</a></p></td>
 </tr>
 </tbody>
@@ -3026,6 +3092,11 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_rolebinding">v1beta1.RoleBinding</a></p></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">201</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Created</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_rolebinding">v1beta1.RoleBinding</a></p></td>
+</tr>
 </tbody>
 </table>
 
@@ -3131,7 +3202,15 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">propagationPolicy</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Whether and how garbage collection will be performed. Either this field or OrphanDependents may be set, but not both. The default policy is decided by the existing finalizer set in the metadata.finalizers and the resource-specific default policy.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Whether and how garbage collection will be performed. Either this field or OrphanDependents may be set, but not both. The default policy is decided by the existing finalizer set in the metadata.finalizers and the resource-specific default policy. Acceptable values are: <em>Orphan</em> - orphan the dependents; <em>Background</em> - allow the garbage collector to delete the dependents in the background; <em>Foreground</em> - a cascading policy that deletes all dependents in the foreground.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">dryRun</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">When present, indicates that modifications should not be persisted. An invalid or unrecognized dryRun directive will result in an error response and no further processing of the request. Valid values are: - All: all dry run stages will be processed</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -3172,6 +3251,11 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </tr>
 </thead>
 <tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">202</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Accepted</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1_status">v1.Status</a></p></td>
+</tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">200</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
@@ -3431,7 +3515,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -3613,7 +3697,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -3783,8 +3867,18 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </thead>
 <tbody>
 <tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">202</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Accepted</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_role">v1beta1.Role</a></p></td>
+</tr>
+<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">200</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_role">v1beta1.Role</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">201</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Created</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_role">v1beta1.Role</a></p></td>
 </tr>
 </tbody>
@@ -4033,6 +4127,11 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_role">v1beta1.Role</a></p></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">201</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Created</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1beta1_role">v1beta1.Role</a></p></td>
+</tr>
 </tbody>
 </table>
 
@@ -4138,7 +4237,15 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">propagationPolicy</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Whether and how garbage collection will be performed. Either this field or OrphanDependents may be set, but not both. The default policy is decided by the existing finalizer set in the metadata.finalizers and the resource-specific default policy.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Whether and how garbage collection will be performed. Either this field or OrphanDependents may be set, but not both. The default policy is decided by the existing finalizer set in the metadata.finalizers and the resource-specific default policy. Acceptable values are: <em>Orphan</em> - orphan the dependents; <em>Background</em> - allow the garbage collector to delete the dependents in the background; <em>Foreground</em> - a cascading policy that deletes all dependents in the foreground.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">dryRun</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">When present, indicates that modifications should not be persisted. An invalid or unrecognized dryRun directive will result in an error response and no further processing of the request. Valid values are: - All: all dry run stages will be processed</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -4179,6 +4286,11 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </tr>
 </thead>
 <tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">202</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Accepted</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="../definitions#_v1_status">v1.Status</a></p></td>
+</tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">200</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">success</p></td>
@@ -4438,7 +4550,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -4612,7 +4724,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -4707,7 +4819,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_individual_changes_to_a_list_of_clusterrolebinding">watch individual changes to a list of ClusterRoleBinding</h3>
+<h3 id="_watch_individual_changes_to_a_list_of_clusterrolebinding_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead">watch individual changes to a list of ClusterRoleBinding. deprecated: use the <em>watch</em> parameter with a list operation instead.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/clusterrolebindings</pre>
@@ -4786,7 +4898,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -4881,7 +4993,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_changes_to_an_object_of_kind_clusterrolebinding">watch changes to an object of kind ClusterRoleBinding</h3>
+<h3 id="_watch_changes_to_an_object_of_kind_clusterrolebinding_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead_filtered_to_a_single_item_with_the_em_fieldselector_em_parameter">watch changes to an object of kind ClusterRoleBinding. deprecated: use the <em>watch</em> parameter with a list operation instead, filtered to a single item with the <em>fieldSelector</em> parameter.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/clusterrolebindings/{name}</pre>
@@ -4960,7 +5072,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -5063,7 +5175,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_individual_changes_to_a_list_of_clusterrole">watch individual changes to a list of ClusterRole</h3>
+<h3 id="_watch_individual_changes_to_a_list_of_clusterrole_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead">watch individual changes to a list of ClusterRole. deprecated: use the <em>watch</em> parameter with a list operation instead.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/clusterroles</pre>
@@ -5142,7 +5254,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -5237,7 +5349,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_changes_to_an_object_of_kind_clusterrole">watch changes to an object of kind ClusterRole</h3>
+<h3 id="_watch_changes_to_an_object_of_kind_clusterrole_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead_filtered_to_a_single_item_with_the_em_fieldselector_em_parameter">watch changes to an object of kind ClusterRole. deprecated: use the <em>watch</em> parameter with a list operation instead, filtered to a single item with the <em>fieldSelector</em> parameter.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/clusterroles/{name}</pre>
@@ -5316,7 +5428,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -5419,7 +5531,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_individual_changes_to_a_list_of_rolebinding">watch individual changes to a list of RoleBinding</h3>
+<h3 id="_watch_individual_changes_to_a_list_of_rolebinding_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead">watch individual changes to a list of RoleBinding. deprecated: use the <em>watch</em> parameter with a list operation instead.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/namespaces/{namespace}/rolebindings</pre>
@@ -5498,7 +5610,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -5601,7 +5713,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_changes_to_an_object_of_kind_rolebinding">watch changes to an object of kind RoleBinding</h3>
+<h3 id="_watch_changes_to_an_object_of_kind_rolebinding_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead_filtered_to_a_single_item_with_the_em_fieldselector_em_parameter">watch changes to an object of kind RoleBinding. deprecated: use the <em>watch</em> parameter with a list operation instead, filtered to a single item with the <em>fieldSelector</em> parameter.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/namespaces/{namespace}/rolebindings/{name}</pre>
@@ -5680,7 +5792,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -5791,7 +5903,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_individual_changes_to_a_list_of_role">watch individual changes to a list of Role</h3>
+<h3 id="_watch_individual_changes_to_a_list_of_role_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead">watch individual changes to a list of Role. deprecated: use the <em>watch</em> parameter with a list operation instead.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/namespaces/{namespace}/roles</pre>
@@ -5870,7 +5982,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -5973,7 +6085,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_changes_to_an_object_of_kind_role">watch changes to an object of kind Role</h3>
+<h3 id="_watch_changes_to_an_object_of_kind_role_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead_filtered_to_a_single_item_with_the_em_fieldselector_em_parameter">watch changes to an object of kind Role. deprecated: use the <em>watch</em> parameter with a list operation instead, filtered to a single item with the <em>fieldSelector</em> parameter.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/namespaces/{namespace}/roles/{name}</pre>
@@ -6052,7 +6164,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -6163,7 +6275,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_individual_changes_to_a_list_of_rolebinding_2">watch individual changes to a list of RoleBinding</h3>
+<h3 id="_watch_individual_changes_to_a_list_of_rolebinding_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead_2">watch individual changes to a list of RoleBinding. deprecated: use the <em>watch</em> parameter with a list operation instead.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/rolebindings</pre>
@@ -6242,7 +6354,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>
@@ -6337,7 +6449,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 </div>
 </div>
 <div class="sect2">
-<h3 id="_watch_individual_changes_to_a_list_of_role_2">watch individual changes to a list of Role</h3>
+<h3 id="_watch_individual_changes_to_a_list_of_role_deprecated_use_the_em_watch_em_parameter_with_a_list_operation_instead_2">watch individual changes to a list of Role. deprecated: use the <em>watch</em> parameter with a list operation instead.</h3>
 <div class="listingblock">
 <div class="content">
 <pre>GET /apis/rbac.authorization.k8s.io/v1beta1/watch/roles</pre>
@@ -6416,7 +6528,7 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">QueryParameter</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">timeoutSeconds</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for the list/watch call. This limits the duration of the call, regardless of any activity or inactivity.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">integer (int32)</p></td>
 <td class="tableblock halign-left valign-top"></td>

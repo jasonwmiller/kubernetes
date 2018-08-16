@@ -17,6 +17,8 @@ limitations under the License.
 package v1beta1
 
 import (
+	"math"
+
 	"k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,6 +65,15 @@ func SetDefaults_DaemonSet(obj *extensionsv1beta1.DaemonSet) {
 	}
 }
 
+func SetDefaults_PodSecurityPolicySpec(obj *extensionsv1beta1.PodSecurityPolicySpec) {
+	// This field was added after PodSecurityPolicy was released.
+	// Policies that do not include this field must remain as permissive as they were prior to the introduction of this field.
+	if obj.AllowPrivilegeEscalation == nil {
+		t := true
+		obj.AllowPrivilegeEscalation = &t
+	}
+}
+
 func SetDefaults_Deployment(obj *extensionsv1beta1.Deployment) {
 	// Default labels and selector to labels from pod template spec.
 	labels := obj.Spec.Template.Labels
@@ -100,6 +111,12 @@ func SetDefaults_Deployment(obj *extensionsv1beta1.Deployment) {
 			maxSurge := intstr.FromInt(1)
 			strategy.RollingUpdate.MaxSurge = &maxSurge
 		}
+	}
+	// Set extensionsv1beta1.DeploymentSpec.ProgressDeadlineSeconds to MaxInt,
+	// which has the same meaning as unset.
+	if obj.Spec.ProgressDeadlineSeconds == nil {
+		obj.Spec.ProgressDeadlineSeconds = new(int32)
+		*obj.Spec.ProgressDeadlineSeconds = math.MaxInt32
 	}
 }
 

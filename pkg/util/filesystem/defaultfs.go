@@ -62,9 +62,19 @@ func (DefaultFs) RemoveAll(path string) error {
 	return os.RemoveAll(path)
 }
 
+// Remove via os.RemoveAll
+func (DefaultFs) Remove(name string) error {
+	return os.Remove(name)
+}
+
 // ReadFile via ioutil.ReadFile
 func (DefaultFs) ReadFile(filename string) ([]byte, error) {
 	return ioutil.ReadFile(filename)
+}
+
+// TempDir via ioutil.TempDir
+func (DefaultFs) TempDir(dir, prefix string) (string, error) {
+	return ioutil.TempDir(dir, prefix)
 }
 
 // TempFile via ioutil.TempFile
@@ -99,6 +109,11 @@ func (file *defaultFile) Name() string {
 // Write via os.File.Write
 func (file *defaultFile) Write(b []byte) (n int, err error) {
 	return file.file.Write(b)
+}
+
+// Sync via os.File.Sync
+func (file *defaultFile) Sync() error {
+	return file.file.Sync()
 }
 
 // Close via os.File.Close

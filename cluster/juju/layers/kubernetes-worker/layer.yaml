@@ -7,11 +7,15 @@ includes:
   - 'layer:metrics'
   - 'layer:nagios'
   - 'layer:tls-client'
-  - 'layer:nvidia-cuda'
+  - 'layer:cdk-service-kicker'
   - 'interface:http'
   - 'interface:kubernetes-cni'
   - 'interface:kube-dns'
   - 'interface:kube-control'
+  - 'interface:aws-integration'
+  - 'interface:gcp-integration'
+  - 'interface:openstack-integration'
+  - 'interface:mount'
 config:
   deletes:
     - install_from_upstream
@@ -29,3 +33,7 @@ options:
     server_key_path: '/root/cdk/server.key'
     client_certificate_path: '/root/cdk/client.crt'
     client_key_path: '/root/cdk/client.key'
+  cdk-service-kicker:
+    services:
+      - 'snap.kubelet.daemon'
+      - 'snap.kube-proxy.daemon'

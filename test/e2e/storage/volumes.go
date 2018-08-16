@@ -53,9 +53,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/kubernetes/pkg/cloudprovider/providers/vsphere"
 	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/storage/utils"
+	vspheretest "k8s.io/kubernetes/test/e2e/storage/vsphere"
 )
 
 func DeleteCinderVolume(name string) error {
@@ -80,12 +81,10 @@ func DeleteCinderVolume(name string) error {
 }
 
 // These tests need privileged containers, which are disabled by default.
-var _ = SIGDescribe("Volumes", func() {
+var _ = utils.SIGDescribe("Volumes", func() {
 	f := framework.NewDefaultFramework("volume")
 
-	// If 'false', the test won't clear its volumes upon completion. Useful for debugging,
 	// note that namespace deletion is handled by delete-namespace flag
-	clean := true
 	// filled inside BeforeEach
 	var cs clientset.Interface
 	var namespace *v1.Namespace
@@ -102,11 +101,7 @@ var _ = SIGDescribe("Volumes", func() {
 	Describe("NFS", func() {
 		It("should be mountable", func() {
 			config, _, serverIP := framework.NewNFSServer(cs, namespace.Name, []string{})
-			defer func() {
-				if clean {
-					framework.VolumeTestCleanup(f, config)
-				}
-			}()
+			defer framework.VolumeTestCleanup(f, config)
 
 			tests := []framework.VolumeTest{
 				{
@@ -133,17 +128,15 @@ var _ = SIGDescribe("Volumes", func() {
 	Describe("GlusterFS", func() {
 		It("should be mountable", func() {
 			//TODO (copejon) GFS is not supported on debian image.
-			framework.SkipUnlessNodeOSDistroIs("gci", "ubuntu")
+			framework.SkipUnlessNodeOSDistroIs("gci", "ubuntu", "custom")
 
 			// create gluster server and endpoints
 			config, _, _ := framework.NewGlusterfsServer(cs, namespace.Name)
 			name := config.Prefix + "-server"
 			defer func() {
-				if clean {
-					framework.VolumeTestCleanup(f, config)
-					err := cs.CoreV1().Endpoints(namespace.Name).Delete(name, nil)
-					Expect(err).NotTo(HaveOccurred(), "defer: Gluster delete endpoints failed")
-				}
+				framework.VolumeTestCleanup(f, config)
+				err := cs.CoreV1().Endpoints(namespace.Name).Delete(name, nil)
+				Expect(err).NotTo(HaveOccurred(), "defer: Gluster delete endpoints failed")
 			}()
 
 			tests := []framework.VolumeTest{
@@ -177,11 +170,7 @@ var _ = SIGDescribe("Volumes", func() {
 	Describe("iSCSI [Feature:Volumes]", func() {
 		It("should be mountable", func() {
 			config, _, serverIP := framework.NewISCSIServer(cs, namespace.Name)
-			defer func() {
-				if clean {
-					framework.VolumeTestCleanup(f, config)
-				}
-			}()
+			defer framework.VolumeTestCleanup(f, config)
 
 			tests := []framework.VolumeTest{
 				{
@@ -210,40 +199,9 @@ var _ = SIGDescribe("Volumes", func() {
 
 	Describe("Ceph RBD [Feature:Volumes]", func() {
 		It("should be mountable", func() {
-			config, _, serverIP := framework.NewRBDServer(cs, namespace.Name)
-			defer func() {
-				if clean {
-					framework.VolumeTestCleanup(f, config)
-				}
-			}()
-
-			// create secrets for the server
-			secret := v1.Secret{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "Secret",
-					APIVersion: "v1",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name: config.Prefix + "-secret",
-				},
-				Data: map[string][]byte{
-					// from test/images/volumes-tester/rbd/keyring
-					"key": []byte("AQDRrKNVbEevChAAEmRC+pW/KBVHxa0w/POILA=="),
-				},
-				Type: "kubernetes.io/rbd",
-			}
-
-			secClient := cs.CoreV1().Secrets(config.Namespace)
-
-			defer func() {
-				if clean {
-					secClient.Delete(config.Prefix+"-secret", nil)
-				}
-			}()
-
-			if _, err := secClient.Create(&secret); err != nil {
-				framework.Failf("Failed to create secrets for Ceph RBD: %v", err)
-			}
+			config, _, secret, serverIP := framework.NewRBDServer(cs, namespace.Name)
+			defer framework.VolumeTestCleanup(f, config)
+			defer cs.CoreV1().Secrets(config.Namespace).Delete(secret.Name, nil)
 
 			tests := []framework.VolumeTest{
 				{
@@ -254,7 +212,7 @@ var _ = SIGDescribe("Volumes", func() {
 							RBDImage:     "foo",
 							RadosUser:    "admin",
 							SecretRef: &v1.LocalObjectReference{
-								Name: config.Prefix + "-secret",
+								Name: secret.Name,
 							},
 							FSType: "ext2",
 						},
@@ -274,51 +232,9 @@ var _ = SIGDescribe("Volumes", func() {
 	////////////////////////////////////////////////////////////////////////
 	Describe("CephFS [Feature:Volumes]", func() {
 		It("should be mountable", func() {
-			config := framework.VolumeTestConfig{
-				Namespace:   namespace.Name,
-				Prefix:      "cephfs",
-				ServerImage: framework.CephServerImage,
-				ServerPorts: []int{6789},
-			}
-
-			defer func() {
-				if clean {
-					framework.VolumeTestCleanup(f, config)
-				}
-			}()
-			_, serverIP := framework.CreateStorageServer(cs, config)
-			By("sleeping a bit to give ceph server time to initialize")
-			time.Sleep(20 * time.Second)
-
-			// create ceph secret
-			secret := &v1.Secret{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "Secret",
-					APIVersion: "v1",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name: config.Prefix + "-secret",
-				},
-				// Must use the ceph keyring at contrib/for-tests/volumes-ceph/ceph/init.sh
-				// and encode in base64
-				Data: map[string][]byte{
-					"key": []byte("AQAMgXhVwBCeDhAA9nlPaFyfUSatGD4drFWDvQ=="),
-				},
-				Type: "kubernetes.io/cephfs",
-			}
-
-			defer func() {
-				if clean {
-					if err := cs.CoreV1().Secrets(namespace.Name).Delete(secret.Name, nil); err != nil {
-						framework.Failf("unable to delete secret %v: %v", secret.Name, err)
-					}
-				}
-			}()
-
-			var err error
-			if secret, err = cs.CoreV1().Secrets(namespace.Name).Create(secret); err != nil {
-				framework.Failf("unable to create test secret %s: %v", secret.Name, err)
-			}
+			config, _, secret, serverIP := framework.NewRBDServer(cs, namespace.Name)
+			defer framework.VolumeTestCleanup(f, config)
+			defer cs.CoreV1().Secrets(config.Namespace).Delete(secret.Name, nil)
 
 			tests := []framework.VolumeTest{
 				{
@@ -326,7 +242,7 @@ var _ = SIGDescribe("Volumes", func() {
 						CephFS: &v1.CephFSVolumeSource{
 							Monitors:  []string{serverIP + ":6789"},
 							User:      "kube",
-							SecretRef: &v1.LocalObjectReference{Name: config.Prefix + "-secret"},
+							SecretRef: &v1.LocalObjectReference{Name: secret.Name},
 							ReadOnly:  true,
 						},
 					},
@@ -347,7 +263,7 @@ var _ = SIGDescribe("Volumes", func() {
 	// (/usr/bin/nova, /usr/bin/cinder and /usr/bin/keystone)
 	// and that the usual OpenStack authentication env. variables are set
 	// (OS_USERNAME, OS_PASSWORD, OS_TENANT_NAME at least).
-	Describe("Cinder [Feature:Volumes]", func() {
+	Describe("Cinder", func() {
 		It("should be mountable", func() {
 			framework.SkipUnlessProviderIs("openstack")
 			config := framework.VolumeTestConfig{
@@ -363,11 +279,7 @@ var _ = SIGDescribe("Volumes", func() {
 			framework.Logf("cinder output:\n%s", outputString)
 			Expect(err).NotTo(HaveOccurred())
 
-			defer func() {
-				// Ignore any cleanup errors, there is not much we can do about
-				// them. They were already logged.
-				DeleteCinderVolume(volumeName)
-			}()
+			defer DeleteCinderVolume(volumeName)
 
 			// Parse 'id'' from stdout. Expected format:
 			// |     attachments     |                  []                  |
@@ -390,10 +302,8 @@ var _ = SIGDescribe("Volumes", func() {
 			Expect(volumeID).NotTo(Equal(""))
 
 			defer func() {
-				if clean {
-					framework.Logf("Running volumeTestCleanup")
-					framework.VolumeTestCleanup(f, config)
-				}
+				framework.Logf("Running volumeTestCleanup")
+				framework.VolumeTestCleanup(f, config)
 			}()
 
 			tests := []framework.VolumeTest{
@@ -439,16 +349,16 @@ var _ = SIGDescribe("Volumes", func() {
 		})
 
 		It("should be mountable with ext3", func() {
-			testGCEPD(f, config, cs, clean, "ext3")
+			testGCEPD(f, config, cs, "ext3")
 		})
 		It("should be mountable with ext4", func() {
-			testGCEPD(f, config, cs, clean, "ext4")
+			testGCEPD(f, config, cs, "ext4")
 		})
 		It("should be mountable with xfs", func() {
 			// xfs is not supported on gci
 			// and not installed by default on debian
-			framework.SkipUnlessNodeOSDistroIs("ubuntu")
-			testGCEPD(f, config, cs, clean, "xfs")
+			framework.SkipUnlessNodeOSDistroIs("ubuntu", "custom")
+			testGCEPD(f, config, cs, "xfs")
 		})
 	})
 
@@ -462,11 +372,7 @@ var _ = SIGDescribe("Volumes", func() {
 				Prefix:    "configmap",
 			}
 
-			defer func() {
-				if clean {
-					framework.VolumeTestCleanup(f, config)
-				}
-			}()
+			defer framework.VolumeTestCleanup(f, config)
 			configMap := &v1.ConfigMap{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "ConfigMap",
@@ -532,32 +438,26 @@ var _ = SIGDescribe("Volumes", func() {
 	////////////////////////////////////////////////////////////////////////
 	// vSphere
 	////////////////////////////////////////////////////////////////////////
-	Describe("vsphere [Feature:Volumes]", func() {
+	Describe("vsphere", func() {
 		It("should be mountable", func() {
 			framework.SkipUnlessProviderIs("vsphere")
-			var (
-				volumePath string
-			)
+			vspheretest.Bootstrap(f)
+			nodeInfo := vspheretest.GetReadySchedulableRandomNodeInfo()
+			var volumePath string
 			config := framework.VolumeTestConfig{
 				Namespace: namespace.Name,
 				Prefix:    "vsphere",
 			}
-			By("creating a test vsphere volume")
-			vsp, err := vsphere.GetVSphere()
-			Expect(err).NotTo(HaveOccurred())
-
-			volumePath, err = createVSphereVolume(vsp, nil)
+			volumePath, err := nodeInfo.VSphere.CreateVolume(&vspheretest.VolumeOptions{}, nodeInfo.DataCenterRef)
 			Expect(err).NotTo(HaveOccurred())
 
 			defer func() {
-				vsp.DeleteVolume(volumePath)
+				nodeInfo.VSphere.DeleteVolume(volumePath, nodeInfo.DataCenterRef)
 			}()
 
 			defer func() {
-				if clean {
-					framework.Logf("Running volumeTestCleanup")
-					framework.VolumeTestCleanup(f, config)
-				}
+				framework.Logf("Running volumeTestCleanup")
+				framework.VolumeTestCleanup(f, config)
 			}()
 
 			tests := []framework.VolumeTest{
@@ -585,7 +485,7 @@ var _ = SIGDescribe("Volumes", func() {
 	////////////////////////////////////////////////////////////////////////
 	// Azure Disk
 	////////////////////////////////////////////////////////////////////////
-	Describe("Azure Disk [Feature:Volumes]", func() {
+	Describe("Azure Disk", func() {
 		It("should be mountable [Slow]", func() {
 			framework.SkipUnlessProviderIs("azure")
 			config := framework.VolumeTestConfig{
@@ -601,10 +501,8 @@ var _ = SIGDescribe("Volumes", func() {
 			}()
 
 			defer func() {
-				if clean {
-					framework.Logf("Running volumeTestCleanup")
-					framework.VolumeTestCleanup(f, config)
-				}
+				framework.Logf("Running volumeTestCleanup")
+				framework.VolumeTestCleanup(f, config)
 			}()
 			fsType := "ext4"
 			readOnly := false
@@ -634,7 +532,7 @@ var _ = SIGDescribe("Volumes", func() {
 	})
 })
 
-func testGCEPD(f *framework.Framework, config framework.VolumeTestConfig, cs clientset.Interface, clean bool, fs string) {
+func testGCEPD(f *framework.Framework, config framework.VolumeTestConfig, cs clientset.Interface, fs string) {
 	By("creating a test gce pd volume")
 	volumeName, err := framework.CreatePDWithRetry()
 	Expect(err).NotTo(HaveOccurred())
@@ -647,10 +545,8 @@ func testGCEPD(f *framework.Framework, config framework.VolumeTestConfig, cs cli
 	}()
 
 	defer func() {
-		if clean {
-			framework.Logf("Running volumeTestCleanup")
-			framework.VolumeTestCleanup(f, config)
-		}
+		framework.Logf("Running volumeTestCleanup")
+		framework.VolumeTestCleanup(f, config)
 	}()
 
 	tests := []framework.VolumeTest{

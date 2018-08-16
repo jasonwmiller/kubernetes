@@ -7,6 +7,8 @@ go_library(
         "run_result.go",
         "test_runner.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/onsi/ginkgo/ginkgo/testrunner",
+    importpath = "github.com/onsi/ginkgo/ginkgo/testrunner",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/onsi/ginkgo/config:go_default_library",

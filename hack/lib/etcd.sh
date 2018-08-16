@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2014 The Kubernetes Authors.
 #
@@ -16,21 +16,31 @@
 
 # A set of helpers for starting/running etcd for tests
 
-ETCD_VERSION=${ETCD_VERSION:-3.0.17}
+ETCD_VERSION=${ETCD_VERSION:-3.2.18}
 ETCD_HOST=${ETCD_HOST:-127.0.0.1}
 ETCD_PORT=${ETCD_PORT:-2379}
 
 kube::etcd::validate() {
   # validate if in path
-  which etcd >/dev/null || {
+  command -v etcd >/dev/null || {
     kube::log::usage "etcd must be in your PATH"
+    kube::log::info "You can use 'hack/install-etcd.sh' to install a copy in third_party/."
     exit 1
   }
 
-  # validate it is not running
-  if pgrep -x etcd >/dev/null 2>&1; then
-    kube::log::usage "etcd appears to already be running on this machine (`pgrep -xl etcd`) (or its a zombie and you need to kill its parent)."
-    kube::log::usage "retry after you resolve this etcd error."
+  # validate etcd port is free
+  local port_check_command
+  if command -v ss &> /dev/null && ss -Version | grep 'iproute2' &> /dev/null; then
+    port_check_command="ss"
+  elif command -v netstat &>/dev/null; then
+    port_check_command="netstat"
+  else
+    kube::log::usage "unable to identify if etcd is bound to port ${ETCD_PORT}. unable to find ss or netstat utilities."
+    exit 1
+  fi
+  if ${port_check_command} -nat | grep "LISTEN" | grep "[\.:]${ETCD_PORT:?}" >/dev/null 2>&1; then
+    kube::log::usage "unable to start etcd as port ${ETCD_PORT} is in use. please stop the process listening on this port and retry."
+    kube::log::usage "`netstat -nat | grep "[\.:]${ETCD_PORT:?} .*LISTEN"`"
     exit 1
   fi
 
@@ -62,7 +72,7 @@ kube::etcd::start() {
   if [[ -d "${ARTIFACTS_DIR:-}" ]]; then
     ETCD_LOGFILE="${ARTIFACTS_DIR}/etcd.$(uname -n).$(id -un).log.DEBUG.$(date +%Y%m%d-%H%M%S).$$"
   else
-    ETCD_LOGFILE=/dev/null
+    ETCD_LOGFILE=${ETCD_LOGFILE:-"/dev/null"}
   fi
   kube::log::info "etcd --advertise-client-urls http://${ETCD_HOST}:${ETCD_PORT} --data-dir ${ETCD_DIR} --listen-client-urls http://${ETCD_HOST}:${ETCD_PORT} --debug > \"${ETCD_LOGFILE}\" 2>/dev/null"
   etcd --advertise-client-urls http://${ETCD_HOST}:${ETCD_PORT} --data-dir ${ETCD_DIR} --listen-client-urls http://${ETCD_HOST}:${ETCD_PORT} --debug 2> "${ETCD_LOGFILE}" >/dev/null &
@@ -74,12 +84,16 @@ kube::etcd::start() {
 }
 
 kube::etcd::stop() {
-  kill "${ETCD_PID-}" >/dev/null 2>&1 || :
-  wait "${ETCD_PID-}" >/dev/null 2>&1 || :
+  if [[ -n "${ETCD_PID-}" ]]; then
+    kill "${ETCD_PID}" &>/dev/null || :
+    wait "${ETCD_PID}" &>/dev/null || :
+  fi
 }
 
 kube::etcd::clean_etcd_dir() {
-  rm -rf "${ETCD_DIR-}"
+  if [[ -n "${ETCD_DIR-}" ]]; then
+    rm -rf "${ETCD_DIR}"
+  fi
 }
 
 kube::etcd::cleanup() {
@@ -89,8 +103,13 @@ kube::etcd::cleanup() {
 
 kube::etcd::install() {
   (
+    local os
     cd "${KUBE_ROOT}/third_party"
-    if [[ $(uname) == "Darwin" ]]; then
+    os=$(uname | tr "[:upper:]" "[:lower:]")
+    if [[ $(readlink etcd) == etcd-v${ETCD_VERSION}-${os}-* ]]; then
+      return  # already installed
+    fi
+    if [[ ${os} == "darwin" ]]; then
       download_file="etcd-v${ETCD_VERSION}-darwin-amd64.zip"
       url="https://github.com/coreos/etcd/releases/download/v${ETCD_VERSION}/${download_file}"
       kube::util::download_file "${url}" "${download_file}"
@@ -103,6 +122,7 @@ kube::etcd::install() {
       kube::util::download_file "${url}" "${download_file}"
       tar xzf "${download_file}"
       ln -fns "etcd-v${ETCD_VERSION}-linux-amd64" etcd
+      rm "${download_file}"
     fi
     kube::log::info "etcd v${ETCD_VERSION} installed. To use:"
     kube::log::info "export PATH=$(pwd)/etcd:\${PATH}"

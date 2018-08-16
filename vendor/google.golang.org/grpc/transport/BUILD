@@ -3,15 +3,17 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library")
 go_library(
     name = "go_default_library",
     srcs = [
+        "bdp_estimator.go",
         "control.go",
-        "go16.go",
-        "go17.go",
         "handler_server.go",
         "http2_client.go",
         "http2_server.go",
         "http_util.go",
+        "log.go",
         "transport.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/google.golang.org/grpc/transport",
+    importpath = "google.golang.org/grpc/transport",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/golang/protobuf/proto:go_default_library",

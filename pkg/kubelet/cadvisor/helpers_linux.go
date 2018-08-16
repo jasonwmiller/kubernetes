@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	cadvisorfs "github.com/google/cadvisor/fs"
+	"k8s.io/kubernetes/pkg/kubelet/types"
 )
 
 // imageFsInfoProvider knows how to translate the configured runtime
@@ -35,14 +36,14 @@ type imageFsInfoProvider struct {
 // For remote runtimes, it handles additional runtimes natively understood by cAdvisor.
 func (i *imageFsInfoProvider) ImageFsInfoLabel() (string, error) {
 	switch i.runtime {
-	case "docker":
+	case types.DockerContainerRuntime:
 		return cadvisorfs.LabelDockerImages, nil
-	case "rkt":
-		return cadvisorfs.LabelRktImages, nil
-	case "remote":
-		// TODO: pending rebase including https://github.com/google/cadvisor/pull/1741
-		if i.runtimeEndpoint == "/var/run/crio.sock" {
-			return "crio-images", nil
+	case types.RemoteContainerRuntime:
+		// This is a temporary workaround to get stats for cri-o from cadvisor
+		// and should be removed.
+		// Related to https://github.com/kubernetes/kubernetes/issues/51798
+		if i.runtimeEndpoint == CrioSocket {
+			return cadvisorfs.LabelCrioImages, nil
 		}
 	}
 	return "", fmt.Errorf("no imagefs label for configured runtime")

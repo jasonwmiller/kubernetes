@@ -68,6 +68,11 @@ func (fs *fakeFs) ReadFile(filename string) ([]byte, error) {
 	return fs.a.ReadFile(filename)
 }
 
+// TempDir via afero.TempDir
+func (fs *fakeFs) TempDir(dir, prefix string) (string, error) {
+	return fs.a.TempDir(dir, prefix)
+}
+
 // TempFile via afero.TempFile
 func (fs *fakeFs) TempFile(dir, prefix string) (File, error) {
 	file, err := fs.a.TempFile(dir, prefix)
@@ -92,6 +97,11 @@ func (fs *fakeFs) RemoveAll(path string) error {
 	return fs.a.RemoveAll(path)
 }
 
+// Remove via afero.RemoveAll
+func (fs *fakeFs) Remove(name string) error {
+	return fs.a.Remove(name)
+}
+
 // fakeFile implements File; for use with fakeFs
 type fakeFile struct {
 	file afero.File
@@ -105,6 +115,11 @@ func (file *fakeFile) Name() string {
 // Write via afero.File.Write
 func (file *fakeFile) Write(b []byte) (n int, err error) {
 	return file.file.Write(b)
+}
+
+// Sync via afero.File.Sync
+func (file *fakeFile) Sync() error {
+	return file.file.Sync()
 }
 
 // Close via afero.File.Close

@@ -17,10 +17,13 @@ limitations under the License.
 package upgrade
 
 import (
+	"io/ioutil"
+	"os"
 	"reflect"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/util/version"
+	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
+	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
 )
 
 func TestSetImplicitFlags(t *testing.T) {
@@ -38,7 +41,6 @@ func TestSetImplicitFlags(t *testing.T) {
 			},
 			expectedFlags: applyFlags{
 				newK8sVersionStr:   "v1.8.0",
-				newK8sVersion:      version.MustParseSemantic("v1.8.0"),
 				dryRun:             false,
 				force:              false,
 				nonInteractiveMode: false,
@@ -53,7 +55,6 @@ func TestSetImplicitFlags(t *testing.T) {
 			},
 			expectedFlags: applyFlags{
 				newK8sVersionStr:   "v1.8.0",
-				newK8sVersion:      version.MustParseSemantic("v1.8.0"),
 				dryRun:             false,
 				force:              false,
 				nonInteractiveMode: true,
@@ -68,7 +69,6 @@ func TestSetImplicitFlags(t *testing.T) {
 			},
 			expectedFlags: applyFlags{
 				newK8sVersionStr:   "v1.8.0",
-				newK8sVersion:      version.MustParseSemantic("v1.8.0"),
 				dryRun:             true,
 				force:              false,
 				nonInteractiveMode: true,
@@ -83,7 +83,6 @@ func TestSetImplicitFlags(t *testing.T) {
 			},
 			expectedFlags: applyFlags{
 				newK8sVersionStr:   "v1.8.0",
-				newK8sVersion:      version.MustParseSemantic("v1.8.0"),
 				dryRun:             false,
 				force:              true,
 				nonInteractiveMode: true,
@@ -98,7 +97,6 @@ func TestSetImplicitFlags(t *testing.T) {
 			},
 			expectedFlags: applyFlags{
 				newK8sVersionStr:   "v1.8.0",
-				newK8sVersion:      version.MustParseSemantic("v1.8.0"),
 				dryRun:             true,
 				force:              true,
 				nonInteractiveMode: true,
@@ -113,7 +111,6 @@ func TestSetImplicitFlags(t *testing.T) {
 			},
 			expectedFlags: applyFlags{
 				newK8sVersionStr:   "v1.8.0",
-				newK8sVersion:      version.MustParseSemantic("v1.8.0"),
 				dryRun:             true,
 				force:              true,
 				nonInteractiveMode: true,
@@ -127,45 +124,6 @@ func TestSetImplicitFlags(t *testing.T) {
 				newK8sVersionStr: "",
 			},
 			errExpected: true,
-		},
-		{ // if the new version is invalid; it should error out
-			flags: &applyFlags{
-				newK8sVersionStr: "foo",
-			},
-			expectedFlags: applyFlags{
-				newK8sVersionStr: "foo",
-			},
-			errExpected: true,
-		},
-		{ // if the new version is valid but without the "v" prefix; it parse and prepend v
-			flags: &applyFlags{
-				newK8sVersionStr: "1.8.0",
-			},
-			expectedFlags: applyFlags{
-				newK8sVersionStr: "v1.8.0",
-				newK8sVersion:    version.MustParseSemantic("v1.8.0"),
-			},
-			errExpected: false,
-		},
-		{ // valid version should succeed
-			flags: &applyFlags{
-				newK8sVersionStr: "v1.8.1",
-			},
-			expectedFlags: applyFlags{
-				newK8sVersionStr: "v1.8.1",
-				newK8sVersion:    version.MustParseSemantic("v1.8.1"),
-			},
-			errExpected: false,
-		},
-		{ // valid version should succeed
-			flags: &applyFlags{
-				newK8sVersionStr: "1.8.0-alpha.3",
-			},
-			expectedFlags: applyFlags{
-				newK8sVersionStr: "v1.8.0-alpha.3",
-				newK8sVersion:    version.MustParseSemantic("v1.8.0-alpha.3"),
-			},
-			errExpected: false,
 		},
 	}
 	for _, rt := range tests {
@@ -191,4 +149,91 @@ func TestSetImplicitFlags(t *testing.T) {
 			)
 		}
 	}
+}
+
+func TestGetPathManagerForUpgrade(t *testing.T) {
+
+	haEtcd := &kubeadmapi.InitConfiguration{
+		Etcd: kubeadmapi.Etcd{
+			External: &kubeadmapi.ExternalEtcd{
+				Endpoints: []string{"10.100.0.1:2379", "10.100.0.2:2379", "10.100.0.3:2379"},
+			},
+		},
+	}
+
+	noHAEtcd := &kubeadmapi.InitConfiguration{}
+
+	tests := []struct {
+		name             string
+		cfg              *kubeadmapi.InitConfiguration
+		etcdUpgrade      bool
+		shouldDeleteEtcd bool
+	}{
+		{
+			name:             "ha etcd but no etcd upgrade",
+			cfg:              haEtcd,
+			etcdUpgrade:      false,
+			shouldDeleteEtcd: true,
+		},
+		{
+			name:             "non-ha etcd with etcd upgrade",
+			cfg:              noHAEtcd,
+			etcdUpgrade:      true,
+			shouldDeleteEtcd: false,
+		},
+		{
+			name:             "ha etcd and etcd upgrade",
+			cfg:              haEtcd,
+			etcdUpgrade:      true,
+			shouldDeleteEtcd: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Use a temporary directory
+			tmpdir, err := ioutil.TempDir("", "TestGetPathManagerForUpgrade")
+			if err != nil {
+				t.Fatalf("unexpected error making temporary directory: %v", err)
+			}
+			oldK8sDir := constants.KubernetesDir
+			constants.KubernetesDir = tmpdir
+			defer func() {
+				constants.KubernetesDir = oldK8sDir
+				os.RemoveAll(tmpdir)
+			}()
+
+			pathmgr, err := GetPathManagerForUpgrade(test.cfg, test.etcdUpgrade)
+			if err != nil {
+				t.Fatalf("unexpected error creating path manager: %v", err)
+			}
+
+			if _, err := os.Stat(pathmgr.BackupManifestDir()); os.IsNotExist(err) {
+				t.Errorf("expected manifest dir %s to exist, but it did not (%v)", pathmgr.BackupManifestDir(), err)
+			}
+
+			if _, err := os.Stat(pathmgr.BackupEtcdDir()); os.IsNotExist(err) {
+				t.Errorf("expected etcd dir %s to exist, but it did not (%v)", pathmgr.BackupEtcdDir(), err)
+			}
+
+			if err := pathmgr.CleanupDirs(); err != nil {
+				t.Fatalf("unexpected error cleaning up directories: %v", err)
+			}
+
+			if _, err := os.Stat(pathmgr.BackupManifestDir()); os.IsNotExist(err) {
+				t.Errorf("expected manifest dir %s to exist, but it did not (%v)", pathmgr.BackupManifestDir(), err)
+			}
+
+			if test.shouldDeleteEtcd {
+				if _, err := os.Stat(pathmgr.BackupEtcdDir()); !os.IsNotExist(err) {
+					t.Errorf("expected etcd dir %s not to exist, but it did (%v)", pathmgr.BackupEtcdDir(), err)
+				}
+			} else {
+				if _, err := os.Stat(pathmgr.BackupEtcdDir()); os.IsNotExist(err) {
+					t.Errorf("expected etcd dir %s to exist, but it did not", pathmgr.BackupEtcdDir())
+				}
+			}
+		})
+	}
+
 }

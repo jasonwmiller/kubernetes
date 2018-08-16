@@ -17,17 +17,17 @@ limitations under the License.
 package remote
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/golang/glog"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	internalapi "k8s.io/kubernetes/pkg/kubelet/apis/cri"
-	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/v1alpha1/runtime"
+	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 	"k8s.io/kubernetes/pkg/kubelet/util"
 	utilexec "k8s.io/utils/exec"
 )
@@ -40,12 +40,12 @@ type RemoteRuntimeService struct {
 
 // NewRemoteRuntimeService creates a new internalapi.RuntimeService.
 func NewRemoteRuntimeService(endpoint string, connectionTimeout time.Duration) (internalapi.RuntimeService, error) {
-	glog.Infof("Connecting to runtime service %s", endpoint)
+	glog.V(3).Infof("Connecting to runtime service %s", endpoint)
 	addr, dailer, err := util.GetAddressAndDialer(endpoint)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithTimeout(connectionTimeout), grpc.WithDialer(dailer))
+	conn, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithTimeout(connectionTimeout), grpc.WithDialer(dailer), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMsgSize)))
 	if err != nil {
 		glog.Errorf("Connect remote runtime %s failed: %v", addr, err)
 		return nil, err
@@ -166,7 +166,7 @@ func (r *RemoteRuntimeService) ListPodSandbox(filter *runtimeapi.PodSandboxFilte
 		Filter: filter,
 	})
 	if err != nil {
-		glog.Errorf("ListPodSandbox with filter %q from runtime service failed: %v", filter, err)
+		glog.Errorf("ListPodSandbox with filter %+v from runtime service failed: %v", filter, err)
 		return nil, err
 	}
 
@@ -259,7 +259,7 @@ func (r *RemoteRuntimeService) ListContainers(filter *runtimeapi.ContainerFilter
 		Filter: filter,
 	})
 	if err != nil {
-		glog.Errorf("ListContainers with filter %q from runtime service failed: %v", filter, err)
+		glog.Errorf("ListContainers with filter %+v from runtime service failed: %v", filter, err)
 		return nil, err
 	}
 
@@ -444,10 +444,47 @@ func (r *RemoteRuntimeService) Status() (*runtimeapi.RuntimeStatus, error) {
 	return resp.Status, nil
 }
 
-func (r *RemoteRuntimeService) ContainerStats(req *runtimeapi.ContainerStatsRequest) (*runtimeapi.ContainerStatsResponse, error) {
-	return nil, fmt.Errorf("Not implemented")
+// ContainerStats returns the stats of the container.
+func (r *RemoteRuntimeService) ContainerStats(containerID string) (*runtimeapi.ContainerStats, error) {
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	resp, err := r.runtimeClient.ContainerStats(ctx, &runtimeapi.ContainerStatsRequest{
+		ContainerId: containerID,
+	})
+	if err != nil {
+		glog.Errorf("ContainerStatus %q from runtime service failed: %v", containerID, err)
+		return nil, err
+	}
+
+	return resp.GetStats(), nil
 }
 
-func (r *RemoteRuntimeService) ListContainerStats(req *runtimeapi.ListContainerStatsRequest) (*runtimeapi.ListContainerStatsResponse, error) {
-	return nil, fmt.Errorf("Not implemented")
+func (r *RemoteRuntimeService) ListContainerStats(filter *runtimeapi.ContainerStatsFilter) ([]*runtimeapi.ContainerStats, error) {
+	// Do not set timeout, because writable layer stats collection takes time.
+	// TODO(random-liu): Should we assume runtime should cache the result, and set timeout here?
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
+
+	resp, err := r.runtimeClient.ListContainerStats(ctx, &runtimeapi.ListContainerStatsRequest{
+		Filter: filter,
+	})
+	if err != nil {
+		glog.Errorf("ListContainerStats with filter %+v from runtime service failed: %v", filter, err)
+		return nil, err
+	}
+
+	return resp.GetStats(), nil
+}
+
+func (r *RemoteRuntimeService) ReopenContainerLog(containerID string) error {
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	_, err := r.runtimeClient.ReopenContainerLog(ctx, &runtimeapi.ReopenContainerLogRequest{ContainerId: containerID})
+	if err != nil {
+		glog.Errorf("ReopenContainerLog %q from runtime service failed: %v", containerID, err)
+		return err
+	}
+	return nil
 }

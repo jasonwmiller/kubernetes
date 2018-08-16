@@ -8,13 +8,14 @@ load(
 
 go_binary(
     name = "netexec",
-    library = ":go_default_library",
+    embed = [":go_default_library"],
 )
 
 go_library(
     name = "go_default_library",
     srcs = ["netexec.go"],
-    deps = ["//vendor/k8s.io/apimachinery/pkg/util/net:go_default_library"],
+    importpath = "k8s.io/kubernetes/test/images/netexec",
+    deps = ["//staging/src/k8s.io/apimachinery/pkg/util/net:go_default_library"],
 )
 
 filegroup(

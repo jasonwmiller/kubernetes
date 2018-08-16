@@ -6,14 +6,10 @@ go_library(
         "record.go",
         "record.pb.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/coreos/etcd/wal/walpb",
+    importpath = "github.com/coreos/etcd/wal/walpb",
     visibility = ["//visibility:public"],
     deps = ["//vendor/github.com/golang/protobuf/proto:go_default_library"],
-)
-
-filegroup(
-    name = "go_default_library_protos",
-    srcs = ["record.proto"],
-    visibility = ["//visibility:public"],
 )
 
 filegroup(

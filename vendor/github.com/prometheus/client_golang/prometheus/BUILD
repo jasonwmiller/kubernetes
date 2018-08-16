@@ -23,6 +23,8 @@ go_library(
         "value.go",
         "vec.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/prometheus/client_golang/prometheus",
+    importpath = "github.com/prometheus/client_golang/prometheus",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/beorn7/perks/quantile:go_default_library",

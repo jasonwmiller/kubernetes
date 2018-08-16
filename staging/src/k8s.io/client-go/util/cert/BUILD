@@ -13,7 +13,7 @@ go_test(
         "pem_test.go",
     ],
     data = glob(["testdata/**"]),
-    library = ":go_default_library",
+    embed = [":go_default_library"],
 )
 
 go_library(
@@ -24,9 +24,8 @@ go_library(
         "io.go",
         "pem.go",
     ],
-    data = [
-        "testdata/dontUseThisKey.pem",
-    ],
+    importmap = "k8s.io/kubernetes/vendor/k8s.io/client-go/util/cert",
+    importpath = "k8s.io/client-go/util/cert",
 )
 
 filegroup(

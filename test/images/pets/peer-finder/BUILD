@@ -1,7 +1,5 @@
 package(default_visibility = ["//visibility:public"])
 
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_binary",
@@ -10,15 +8,14 @@ load(
 
 go_binary(
     name = "peer-finder",
-    library = ":go_default_library",
-    tags = ["automanaged"],
+    embed = [":go_default_library"],
 )
 
 go_library(
     name = "go_default_library",
     srcs = ["peer-finder.go"],
-    tags = ["automanaged"],
-    deps = ["//vendor/k8s.io/apimachinery/pkg/util/sets:go_default_library"],
+    importpath = "k8s.io/kubernetes/test/images/pets/peer-finder",
+    deps = ["//staging/src/k8s.io/apimachinery/pkg/util/sets:go_default_library"],
 )
 
 filegroup(

@@ -20,15 +20,11 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
-	clientset "k8s.io/client-go/kubernetes"
-	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
 func EtcdUpgrade(target_storage, target_version string) error {
@@ -40,12 +36,23 @@ func EtcdUpgrade(target_storage, target_version string) error {
 	}
 }
 
+func IngressUpgrade(isUpgrade bool) error {
+	switch TestContext.Provider {
+	case "gce":
+		return ingressUpgradeGCE(isUpgrade)
+	default:
+		return fmt.Errorf("IngressUpgrade() is not implemented for provider %s", TestContext.Provider)
+	}
+}
+
 func MasterUpgrade(v string) error {
 	switch TestContext.Provider {
 	case "gce":
 		return masterUpgradeGCE(v, false)
 	case "gke":
 		return masterUpgradeGKE(v)
+	case "kubernetes-anywhere":
+		return masterUpgradeKubernetesAnywhere(v)
 	default:
 		return fmt.Errorf("MasterUpgrade() is not implemented for provider %s", TestContext.Provider)
 	}
@@ -56,9 +63,30 @@ func etcdUpgradeGCE(target_storage, target_version string) error {
 		os.Environ(),
 		"TEST_ETCD_VERSION="+target_version,
 		"STORAGE_BACKEND="+target_storage,
-		"TEST_ETCD_IMAGE=3.0.17")
+		"TEST_ETCD_IMAGE=3.2.18-0")
 
 	_, _, err := RunCmdEnv(env, gceUpgradeScript(), "-l", "-M")
+	return err
+}
+
+func ingressUpgradeGCE(isUpgrade bool) error {
+	var command string
+	if isUpgrade {
+		// User specified image to upgrade to.
+		targetImage := TestContext.IngressUpgradeImage
+		if targetImage != "" {
+			command = fmt.Sprintf("sudo sed -i -re 's|(image:)(.*)|\\1 %s|' /etc/kubernetes/manifests/glbc.manifest", targetImage)
+		} else {
+			// Upgrade to latest HEAD image.
+			command = "sudo sed -i -re 's/(image:)(.*)/\\1 gcr.io\\/k8s-ingress-image-push\\/ingress-gce-e2e-glbc-amd64:master/' /etc/kubernetes/manifests/glbc.manifest"
+		}
+	} else {
+		// Downgrade to latest release image.
+		command = "sudo sed -i -re 's/(image:)(.*)/\\1 k8s.gcr.io\\/ingress-gce-glbc-amd64:v1.1.1/' /etc/kubernetes/manifests/glbc.manifest"
+	}
+	// Kubelet should restart glbc automatically.
+	sshResult, err := NodeExec(GetMasterHost(), command)
+	LogSSHResult(sshResult)
 	return err
 }
 
@@ -75,7 +103,11 @@ func masterUpgradeGCE(rawV string, enableKubeProxyDaemonSet bool) error {
 		env = append(env,
 			"TEST_ETCD_VERSION="+TestContext.EtcdUpgradeVersion,
 			"STORAGE_BACKEND="+TestContext.EtcdUpgradeStorage,
-			"TEST_ETCD_IMAGE=3.0.17")
+			"TEST_ETCD_IMAGE=3.2.18-0")
+	} else {
+		// In e2e tests, we skip the confirmation prompt about
+		// implicit etcd upgrades to simulate the user entering "y".
+		env = append(env, "TEST_ALLOW_IMPLICIT_ETCD_UPGRADE=true")
 	}
 
 	v := "v" + rawV
@@ -83,22 +115,78 @@ func masterUpgradeGCE(rawV string, enableKubeProxyDaemonSet bool) error {
 	return err
 }
 
+func locationParamGKE() string {
+	if TestContext.CloudConfig.MultiMaster {
+		// GKE Regional Clusters are being tested.
+		return fmt.Sprintf("--region=%s", TestContext.CloudConfig.Region)
+	}
+	return fmt.Sprintf("--zone=%s", TestContext.CloudConfig.Zone)
+}
+
+func appendContainerCommandGroupIfNeeded(args []string) []string {
+	if TestContext.CloudConfig.Region != "" {
+		// TODO(wojtek-t): Get rid of it once Regional Clusters go to GA.
+		return append([]string{"beta"}, args...)
+	}
+	return args
+}
+
 func masterUpgradeGKE(v string) error {
 	Logf("Upgrading master to %q", v)
-	_, _, err := RunCmd("gcloud", "container",
+	args := []string{
+		"container",
 		"clusters",
 		fmt.Sprintf("--project=%s", TestContext.CloudConfig.ProjectID),
-		fmt.Sprintf("--zone=%s", TestContext.CloudConfig.Zone),
+		locationParamGKE(),
 		"upgrade",
 		TestContext.CloudConfig.Cluster,
 		"--master",
 		fmt.Sprintf("--cluster-version=%s", v),
-		"--quiet")
+		"--quiet",
+	}
+	_, _, err := RunCmd("gcloud", appendContainerCommandGroupIfNeeded(args)...)
 	if err != nil {
 		return err
 	}
 
 	waitForSSHTunnels()
+
+	return nil
+}
+
+func masterUpgradeKubernetesAnywhere(v string) error {
+	Logf("Upgrading master to %q", v)
+
+	kaPath := TestContext.KubernetesAnywherePath
+	originalConfigPath := filepath.Join(kaPath, ".config")
+	backupConfigPath := filepath.Join(kaPath, ".config.bak")
+	updatedConfigPath := filepath.Join(kaPath, fmt.Sprintf(".config-%s", v))
+
+	// modify config with specified k8s version
+	if _, _, err := RunCmd("sed",
+		"-i.bak", // writes original to .config.bak
+		fmt.Sprintf(`s/kubernetes_version=.*$/kubernetes_version=%q/`, v),
+		originalConfigPath); err != nil {
+		return err
+	}
+
+	defer func() {
+		// revert .config.bak to .config
+		if err := os.Rename(backupConfigPath, originalConfigPath); err != nil {
+			Logf("Could not rename %s back to %s", backupConfigPath, originalConfigPath)
+		}
+	}()
+
+	// invoke ka upgrade
+	if _, _, err := RunCmd("make", "-C", TestContext.KubernetesAnywherePath,
+		"WAIT_FOR_KUBECONFIG=y", "upgrade-master"); err != nil {
+		return err
+	}
+
+	// move .config to .config.<version>
+	if err := os.Rename(originalConfigPath, updatedConfigPath); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -117,16 +205,7 @@ func NodeUpgrade(f *Framework, v string, img string) error {
 	if err != nil {
 		return err
 	}
-
-	// Wait for it to complete and validate nodes are healthy.
-	//
-	// TODO(ihmccreery) We shouldn't have to wait for nodes to be ready in
-	// GKE; the operation shouldn't return until they all are.
-	Logf("Waiting up to %v for all nodes to be ready after the upgrade", RestartNodeReadyAgainTimeout)
-	if _, err := CheckNodesReady(f.ClientSet, RestartNodeReadyAgainTimeout, TestContext.CloudConfig.NumNodes); err != nil {
-		return err
-	}
-	return nil
+	return waitForNodesReadyAfterUpgrade(f)
 }
 
 // TODO(mrhohn): Remove this function when kube-proxy is run as a DaemonSet by default.
@@ -135,9 +214,20 @@ func NodeUpgradeGCEWithKubeProxyDaemonSet(f *Framework, v string, img string, en
 	if err := nodeUpgradeGCE(v, img, enableKubeProxyDaemonSet); err != nil {
 		return err
 	}
+	return waitForNodesReadyAfterUpgrade(f)
+}
+
+func waitForNodesReadyAfterUpgrade(f *Framework) error {
 	// Wait for it to complete and validate nodes are healthy.
-	Logf("Waiting up to %v for all nodes to be ready after the upgrade", RestartNodeReadyAgainTimeout)
-	if _, err := CheckNodesReady(f.ClientSet, RestartNodeReadyAgainTimeout, TestContext.CloudConfig.NumNodes); err != nil {
+	//
+	// TODO(ihmccreery) We shouldn't have to wait for nodes to be ready in
+	// GKE; the operation shouldn't return until they all are.
+	numNodes, err := NumberOfRegisteredNodes(f.ClientSet)
+	if err != nil {
+		return fmt.Errorf("couldn't detect number of nodes")
+	}
+	Logf("Waiting up to %v for all %d nodes to be ready after the upgrade", RestartNodeReadyAgainTimeout, numNodes)
+	if _, err := CheckNodesReady(f.ClientSet, numNodes, RestartNodeReadyAgainTimeout); err != nil {
 		return err
 	}
 	return nil
@@ -162,7 +252,7 @@ func nodeUpgradeGKE(v string, img string) error {
 		"container",
 		"clusters",
 		fmt.Sprintf("--project=%s", TestContext.CloudConfig.ProjectID),
-		fmt.Sprintf("--zone=%s", TestContext.CloudConfig.Zone),
+		locationParamGKE(),
 		"upgrade",
 		TestContext.CloudConfig.Cluster,
 		fmt.Sprintf("--cluster-version=%s", v),
@@ -171,7 +261,7 @@ func nodeUpgradeGKE(v string, img string) error {
 	if len(img) > 0 {
 		args = append(args, fmt.Sprintf("--image-type=%s", img))
 	}
-	_, _, err := RunCmd("gcloud", args...)
+	_, _, err := RunCmd("gcloud", appendContainerCommandGroupIfNeeded(args)...)
 
 	if err != nil {
 		return err
@@ -180,64 +270,6 @@ func nodeUpgradeGKE(v string, img string) error {
 	waitForSSHTunnels()
 
 	return nil
-}
-
-// CheckNodesReady waits up to nt for expect nodes accessed by c to be ready,
-// returning an error if this doesn't happen in time. It returns the names of
-// nodes it finds.
-func CheckNodesReady(c clientset.Interface, nt time.Duration, expect int) ([]string, error) {
-	// First, keep getting all of the nodes until we get the number we expect.
-	var nodeList *v1.NodeList
-	var errLast error
-	start := time.Now()
-	found := wait.Poll(Poll, nt, func() (bool, error) {
-		// A rolling-update (GCE/GKE implementation of restart) can complete before the apiserver
-		// knows about all of the nodes. Thus, we retry the list nodes call
-		// until we get the expected number of nodes.
-		nodeList, errLast = c.Core().Nodes().List(metav1.ListOptions{
-			FieldSelector: fields.Set{"spec.unschedulable": "false"}.AsSelector().String()})
-		if errLast != nil {
-			return false, nil
-		}
-		if len(nodeList.Items) != expect {
-			errLast = fmt.Errorf("expected to find %d nodes but found only %d (%v elapsed)",
-				expect, len(nodeList.Items), time.Since(start))
-			Logf("%v", errLast)
-			return false, nil
-		}
-		return true, nil
-	}) == nil
-	nodeNames := make([]string, len(nodeList.Items))
-	for i, n := range nodeList.Items {
-		nodeNames[i] = n.ObjectMeta.Name
-	}
-	if !found {
-		return nodeNames, fmt.Errorf("couldn't find %d nodes within %v; last error: %v",
-			expect, nt, errLast)
-	}
-	Logf("Successfully found %d nodes", expect)
-
-	// Next, ensure in parallel that all the nodes are ready. We subtract the
-	// time we spent waiting above.
-	timeout := nt - time.Since(start)
-	result := make(chan bool, len(nodeList.Items))
-	for _, n := range nodeNames {
-		n := n
-		go func() { result <- WaitForNodeToBeReady(c, n, timeout) }()
-	}
-	failed := false
-	// TODO(mbforbes): Change to `for range` syntax once we support only Go
-	// >= 1.4.
-	for i := range nodeList.Items {
-		_ = i
-		if !<-result {
-			failed = true
-		}
-	}
-	if failed {
-		return nodeNames, fmt.Errorf("at least one node failed to be ready")
-	}
-	return nodeNames, nil
 }
 
 // MigTemplate (GCE-only) returns the name of the MIG template that the
@@ -287,7 +319,7 @@ func gceUpgradeScript() string {
 func waitForSSHTunnels() {
 	Logf("Waiting for SSH tunnels to establish")
 	RunKubectl("run", "ssh-tunnel-test",
-		"--image="+imageutils.GetBusyBoxImage(),
+		"--image=busybox",
 		"--restart=Never",
 		"--command", "--",
 		"echo", "Hello")

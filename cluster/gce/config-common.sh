@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2016 The Kubernetes Authors.
 #
@@ -95,11 +95,22 @@ function get-cluster-ip-range {
   if [[ "${NUM_NODES}" -gt 4000 ]]; then
     suggested_range="10.64.0.0/11"
   fi
-  echo "${suggested_range}" 
+  echo "${suggested_range}"
 }
 
-if [[ "${FEDERATION:-}" == true ]]; then
-    NODE_SCOPES="${NODE_SCOPES:-compute-rw,monitoring,logging-write,storage-ro,https://www.googleapis.com/auth/ndev.clouddns.readwrite}"
-else
-    NODE_SCOPES="${NODE_SCOPES:-compute-rw,monitoring,logging-write,storage-ro}"
-fi
+# Calculate ip alias range based on max number of pods.
+# Let pow be the smallest integer which is bigger or equal to log2($1 * 2).
+# (32 - pow) will be returned.
+#
+# $1: The number of max pods limitation.
+function get-alias-range-size() {
+  for pow in {0..31}; do
+    if (( 1 << $pow >= $1 * 2 )); then
+      echo $((32 - pow))
+      return 0
+    fi
+  done
+}
+# NOTE: Avoid giving nodes empty scopes, because kubelet needs a service account
+# in order to initialize properly.
+NODE_SCOPES="${NODE_SCOPES:-monitoring,logging-write,storage-ro}"

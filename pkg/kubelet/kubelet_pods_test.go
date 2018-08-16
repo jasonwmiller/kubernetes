@@ -17,11 +17,9 @@ limitations under the License.
 package kubelet
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,22 +36,25 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/kubernetes/pkg/api"
 	// TODO: remove this import if
-	// api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String() is changed
+	// api.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String() is changed
 	// to "v1"?
-	_ "k8s.io/kubernetes/pkg/api/install"
-	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/v1alpha1/runtime"
+
+	_ "k8s.io/kubernetes/pkg/apis/core/install"
+	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	containertest "k8s.io/kubernetes/pkg/kubelet/container/testing"
 	"k8s.io/kubernetes/pkg/kubelet/server/portforward"
 	"k8s.io/kubernetes/pkg/kubelet/server/remotecommand"
+	"k8s.io/kubernetes/pkg/util/mount"
+	volumetest "k8s.io/kubernetes/pkg/volume/testing"
 )
 
 func TestMakeMounts(t *testing.T) {
 	bTrue := true
 	propagationHostToContainer := v1.MountPropagationHostToContainer
 	propagationBidirectional := v1.MountPropagationBidirectional
+	propagationNone := v1.MountPropagationNone
 
 	testCases := map[string]struct {
 		container      v1.Container
@@ -78,9 +79,10 @@ func TestMakeMounts(t *testing.T) {
 						MountPropagation: &propagationHostToContainer,
 					},
 					{
-						MountPath: "/mnt/path3",
-						Name:      "disk",
-						ReadOnly:  true,
+						MountPath:        "/mnt/path3",
+						Name:             "disk",
+						ReadOnly:         true,
+						MountPropagation: &propagationNone,
 					},
 					{
 						MountPath: "/mnt/path4",
@@ -109,7 +111,7 @@ func TestMakeMounts(t *testing.T) {
 					HostPath:       "/mnt/disk",
 					ReadOnly:       true,
 					SELinuxRelabel: false,
-					Propagation:    runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER,
+					Propagation:    runtimeapi.MountPropagation_PROPAGATION_PRIVATE,
 				},
 				{
 					Name:           "disk4",
@@ -117,7 +119,7 @@ func TestMakeMounts(t *testing.T) {
 					HostPath:       "/mnt/host",
 					ReadOnly:       false,
 					SELinuxRelabel: false,
-					Propagation:    runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER,
+					Propagation:    runtimeapi.MountPropagation_PROPAGATION_PRIVATE,
 				},
 				{
 					Name:           "disk5",
@@ -125,7 +127,7 @@ func TestMakeMounts(t *testing.T) {
 					HostPath:       "/var/lib/kubelet/podID/volumes/empty/disk5",
 					ReadOnly:       false,
 					SELinuxRelabel: false,
-					Propagation:    runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER,
+					Propagation:    runtimeapi.MountPropagation_PROPAGATION_PRIVATE,
 				},
 			},
 			expectErr: false,
@@ -184,7 +186,7 @@ func TestMakeMounts(t *testing.T) {
 					HostPath:       "/mnt/host",
 					ReadOnly:       false,
 					SELinuxRelabel: false,
-					Propagation:    runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER,
+					Propagation:    runtimeapi.MountPropagation_PROPAGATION_PRIVATE,
 				},
 			},
 			expectErr: false,
@@ -223,10 +225,41 @@ func TestMakeMounts(t *testing.T) {
 			expectErr:      true,
 			expectedErrMsg: "unable to provision SubPath `no/backsteps/../allowed`: must not contain '..'",
 		},
+		"volume doesn't exist": {
+			podVolumes: kubecontainer.VolumeMap{},
+			container: v1.Container{
+				VolumeMounts: []v1.VolumeMount{
+					{
+						MountPath: "/mnt/path3",
+						Name:      "disk",
+						ReadOnly:  true,
+					},
+				},
+			},
+			expectErr:      true,
+			expectedErrMsg: "cannot find volume \"disk\" to mount into container \"\"",
+		},
+		"volume mounter is nil": {
+			podVolumes: kubecontainer.VolumeMap{
+				"disk": kubecontainer.VolumeInfo{},
+			},
+			container: v1.Container{
+				VolumeMounts: []v1.VolumeMount{
+					{
+						MountPath: "/mnt/path3",
+						Name:      "disk",
+						ReadOnly:  true,
+					},
+				},
+			},
+			expectErr:      true,
+			expectedErrMsg: "cannot find volume \"disk\" to mount into container \"\"",
+		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
+			fm := &mount.FakeMounter{}
 			pod := v1.Pod{
 				Spec: v1.PodSpec{
 					HostNetwork: true,
@@ -239,7 +272,7 @@ func TestMakeMounts(t *testing.T) {
 				return
 			}
 
-			mounts, err := makeMounts(&pod, "/pod", &tc.container, "fakepodname", "", "", tc.podVolumes)
+			mounts, _, err := makeMounts(&pod, "/pod", &tc.container, "fakepodname", "", "", tc.podVolumes, fm, nil)
 
 			// validate only the error if we expect an error
 			if tc.expectErr {
@@ -262,7 +295,7 @@ func TestMakeMounts(t *testing.T) {
 				t.Errorf("Failed to enable feature gate for MountPropagation: %v", err)
 				return
 			}
-			mounts, err = makeMounts(&pod, "/pod", &tc.container, "fakepodname", "", "", tc.podVolumes)
+			mounts, _, err = makeMounts(&pod, "/pod", &tc.container, "fakepodname", "", "", tc.podVolumes, fm, nil)
 			if !tc.expectErr {
 				expectedPrivateMounts := []kubecontainer.Mount{}
 				for _, mount := range tc.expectedMounts {
@@ -273,6 +306,195 @@ func TestMakeMounts(t *testing.T) {
 				}
 				assert.Equal(t, expectedPrivateMounts, mounts, "mounts of container %+v", tc.container)
 			}
+		})
+	}
+}
+
+func TestDisabledSubpath(t *testing.T) {
+	fm := &mount.FakeMounter{}
+	pod := v1.Pod{
+		Spec: v1.PodSpec{
+			HostNetwork: true,
+		},
+	}
+	podVolumes := kubecontainer.VolumeMap{
+		"disk": kubecontainer.VolumeInfo{Mounter: &stubVolume{path: "/mnt/disk"}},
+	}
+
+	cases := map[string]struct {
+		container   v1.Container
+		expectError bool
+	}{
+		"subpath not specified": {
+			v1.Container{
+				VolumeMounts: []v1.VolumeMount{
+					{
+						MountPath: "/mnt/path3",
+						Name:      "disk",
+						ReadOnly:  true,
+					},
+				},
+			},
+			false,
+		},
+		"subpath specified": {
+			v1.Container{
+				VolumeMounts: []v1.VolumeMount{
+					{
+						MountPath: "/mnt/path3",
+						SubPath:   "/must/not/be/absolute",
+						Name:      "disk",
+						ReadOnly:  true,
+					},
+				},
+			},
+			true,
+		},
+	}
+
+	utilfeature.DefaultFeatureGate.Set("VolumeSubpath=false")
+	defer utilfeature.DefaultFeatureGate.Set("VolumeSubpath=true")
+
+	for name, test := range cases {
+		_, _, err := makeMounts(&pod, "/pod", &test.container, "fakepodname", "", "", podVolumes, fm, nil)
+		if err != nil && !test.expectError {
+			t.Errorf("test %v failed: %v", name, err)
+		}
+		if err == nil && test.expectError {
+			t.Errorf("test %v failed: expected error", name)
+		}
+	}
+}
+
+func TestMakeBlockVolumes(t *testing.T) {
+	testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled */)
+	defer testKubelet.Cleanup()
+	kubelet := testKubelet.kubelet
+	testCases := map[string]struct {
+		container       v1.Container
+		podVolumes      kubecontainer.VolumeMap
+		expectErr       bool
+		expectedErrMsg  string
+		expectedDevices []kubecontainer.DeviceInfo
+	}{
+		"valid volumeDevices in container": {
+			podVolumes: kubecontainer.VolumeMap{
+				"disk1": kubecontainer.VolumeInfo{BlockVolumeMapper: &stubBlockVolume{dirPath: "/dev/", volName: "sda"}},
+				"disk2": kubecontainer.VolumeInfo{BlockVolumeMapper: &stubBlockVolume{dirPath: "/dev/disk/by-path/", volName: "diskPath"}, ReadOnly: true},
+				"disk3": kubecontainer.VolumeInfo{BlockVolumeMapper: &stubBlockVolume{dirPath: "/dev/disk/by-id/", volName: "diskUuid"}},
+				"disk4": kubecontainer.VolumeInfo{BlockVolumeMapper: &stubBlockVolume{dirPath: "/var/lib/", volName: "rawdisk"}, ReadOnly: true},
+			},
+			container: v1.Container{
+				Name: "container1",
+				VolumeDevices: []v1.VolumeDevice{
+					{
+						DevicePath: "/dev/sda",
+						Name:       "disk1",
+					},
+					{
+						DevicePath: "/dev/xvda",
+						Name:       "disk2",
+					},
+					{
+						DevicePath: "/dev/xvdb",
+						Name:       "disk3",
+					},
+					{
+						DevicePath: "/mnt/rawdisk",
+						Name:       "disk4",
+					},
+				},
+			},
+			expectedDevices: []kubecontainer.DeviceInfo{
+				{
+					PathInContainer: "/dev/sda",
+					PathOnHost:      "/dev/sda",
+					Permissions:     "mrw",
+				},
+				{
+					PathInContainer: "/dev/xvda",
+					PathOnHost:      "/dev/disk/by-path/diskPath",
+					Permissions:     "r",
+				},
+				{
+					PathInContainer: "/dev/xvdb",
+					PathOnHost:      "/dev/disk/by-id/diskUuid",
+					Permissions:     "mrw",
+				},
+				{
+					PathInContainer: "/mnt/rawdisk",
+					PathOnHost:      "/var/lib/rawdisk",
+					Permissions:     "r",
+				},
+			},
+			expectErr: false,
+		},
+		"invalid absolute Path": {
+			podVolumes: kubecontainer.VolumeMap{
+				"disk": kubecontainer.VolumeInfo{BlockVolumeMapper: &stubBlockVolume{dirPath: "/dev/", volName: "sda"}},
+			},
+			container: v1.Container{
+				VolumeDevices: []v1.VolumeDevice{
+					{
+						DevicePath: "must/be/absolute",
+						Name:       "disk",
+					},
+				},
+			},
+			expectErr:      true,
+			expectedErrMsg: "error DevicePath `must/be/absolute` must be an absolute path",
+		},
+		"volume doesn't exist": {
+			podVolumes: kubecontainer.VolumeMap{},
+			container: v1.Container{
+				VolumeDevices: []v1.VolumeDevice{
+					{
+						DevicePath: "/dev/sdaa",
+						Name:       "disk",
+					},
+				},
+			},
+			expectErr:      true,
+			expectedErrMsg: "cannot find volume \"disk\" to pass into container \"\"",
+		},
+		"volume BlockVolumeMapper is nil": {
+			podVolumes: kubecontainer.VolumeMap{
+				"disk": kubecontainer.VolumeInfo{},
+			},
+			container: v1.Container{
+				VolumeDevices: []v1.VolumeDevice{
+					{
+						DevicePath: "/dev/sdzz",
+						Name:       "disk",
+					},
+				},
+			},
+			expectErr:      true,
+			expectedErrMsg: "cannot find volume \"disk\" to pass into container \"\"",
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			pod := v1.Pod{
+				Spec: v1.PodSpec{
+					HostNetwork: true,
+				},
+			}
+			blkutil := volumetest.NewBlockVolumePathHandler()
+			blkVolumes, err := kubelet.makeBlockVolumes(&pod, &tc.container, tc.podVolumes, blkutil)
+			// validate only the error if we expect an error
+			if tc.expectErr {
+				if err == nil || err.Error() != tc.expectedErrMsg {
+					t.Fatalf("expected error message `%s` but got `%v`", tc.expectedErrMsg, err)
+				}
+				return
+			}
+			// otherwise validate the devices
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, tc.expectedDevices, blkVolumes, "devices of container %+v", tc.container)
 		})
 	}
 }
@@ -296,7 +518,8 @@ fe00::1	ip6-allnodes
 fe00::2	ip6-allrouters
 123.45.67.89	some.domain
 `,
-			`# hosts file for testing.
+			`# Kubernetes-managed hosts file (host network).
+# hosts file for testing.
 127.0.0.1	localhost
 ::1	localhost ip6-localhost ip6-loopback
 fe00::0	ip6-localnet
@@ -318,7 +541,8 @@ fe00::1	ip6-allnodes
 fe00::2	ip6-allrouters
 12.34.56.78	another.domain
 `,
-			`# another hosts file for testing.
+			`# Kubernetes-managed hosts file (host network).
+# another hosts file for testing.
 127.0.0.1	localhost
 ::1	localhost ip6-localhost ip6-loopback
 fe00::0	ip6-localnet
@@ -342,7 +566,8 @@ fe00::1	ip6-allnodes
 fe00::2	ip6-allrouters
 123.45.67.89	some.domain
 `,
-			`# hosts file for testing.
+			`# Kubernetes-managed hosts file (host network).
+# hosts file for testing.
 127.0.0.1	localhost
 ::1	localhost ip6-localhost ip6-loopback
 fe00::0	ip6-localnet
@@ -372,7 +597,8 @@ fe00::1	ip6-allnodes
 fe00::2	ip6-allrouters
 12.34.56.78	another.domain
 `,
-			`# another hosts file for testing.
+			`# Kubernetes-managed hosts file (host network).
+# another hosts file for testing.
 127.0.0.1	localhost
 ::1	localhost ip6-localhost ip6-loopback
 fe00::0	ip6-localnet
@@ -558,90 +784,6 @@ func TestRunInContainer(t *testing.T) {
 		// this isn't 100% foolproof as a bug in a real ContainerCommandRunner where it fails to copy to stdout/stderr wouldn't be caught by this test
 		assert.Equal(t, "foo", string(actualOutput), "(testError=%v) output", testError)
 		assert.Equal(t, err, testError, "(testError=%v) err", testError)
-	}
-}
-
-func TestGenerateRunContainerOptions_DNSConfigurationParams(t *testing.T) {
-	testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled */)
-	defer testKubelet.Cleanup()
-	kubelet := testKubelet.kubelet
-
-	clusterNS := "203.0.113.1"
-	kubelet.clusterDomain = "kubernetes.io"
-	kubelet.clusterDNS = []net.IP{net.ParseIP(clusterNS)}
-
-	pods := newTestPods(4)
-	pods[0].Spec.DNSPolicy = v1.DNSClusterFirstWithHostNet
-	pods[1].Spec.DNSPolicy = v1.DNSClusterFirst
-	pods[2].Spec.DNSPolicy = v1.DNSClusterFirst
-	pods[2].Spec.HostNetwork = false
-	pods[3].Spec.DNSPolicy = v1.DNSDefault
-
-	options := make([]*kubecontainer.RunContainerOptions, 4)
-	for i, pod := range pods {
-		var err error
-		options[i], _, err = kubelet.GenerateRunContainerOptions(pod, &v1.Container{}, "")
-		if err != nil {
-			t.Fatalf("failed to generate container options: %v", err)
-		}
-	}
-	if len(options[0].DNS) != 1 || options[0].DNS[0] != clusterNS {
-		t.Errorf("expected nameserver %s, got %+v", clusterNS, options[0].DNS)
-	}
-	if len(options[0].DNSSearch) == 0 || options[0].DNSSearch[0] != ".svc."+kubelet.clusterDomain {
-		t.Errorf("expected search %s, got %+v", ".svc."+kubelet.clusterDomain, options[0].DNSSearch)
-	}
-	if len(options[1].DNS) != 1 || options[1].DNS[0] != "127.0.0.1" {
-		t.Errorf("expected nameserver 127.0.0.1, got %+v", options[1].DNS)
-	}
-	if len(options[1].DNSSearch) != 1 || options[1].DNSSearch[0] != "." {
-		t.Errorf("expected search \".\", got %+v", options[1].DNSSearch)
-	}
-	if len(options[2].DNS) != 1 || options[2].DNS[0] != clusterNS {
-		t.Errorf("expected nameserver %s, got %+v", clusterNS, options[2].DNS)
-	}
-	if len(options[2].DNSSearch) == 0 || options[2].DNSSearch[0] != ".svc."+kubelet.clusterDomain {
-		t.Errorf("expected search %s, got %+v", ".svc."+kubelet.clusterDomain, options[2].DNSSearch)
-	}
-	if len(options[3].DNS) != 1 || options[3].DNS[0] != "127.0.0.1" {
-		t.Errorf("expected nameserver 127.0.0.1, got %+v", options[3].DNS)
-	}
-	if len(options[3].DNSSearch) != 1 || options[3].DNSSearch[0] != "." {
-		t.Errorf("expected search \".\", got %+v", options[3].DNSSearch)
-	}
-
-	kubelet.resolverConfig = "/etc/resolv.conf"
-	for i, pod := range pods {
-		var err error
-		options[i], _, err = kubelet.GenerateRunContainerOptions(pod, &v1.Container{}, "")
-		if err != nil {
-			t.Fatalf("failed to generate container options: %v", err)
-		}
-	}
-	t.Logf("nameservers %+v", options[1].DNS)
-	if len(options[0].DNS) != 1 {
-		t.Errorf("expected cluster nameserver only, got %+v", options[0].DNS)
-	} else if options[0].DNS[0] != clusterNS {
-		t.Errorf("expected nameserver %s, got %v", clusterNS, options[0].DNS[0])
-	}
-	expLength := len(options[1].DNSSearch) + 3
-	if expLength > 6 {
-		expLength = 6
-	}
-	if len(options[0].DNSSearch) != expLength {
-		t.Errorf("expected prepend of cluster domain, got %+v", options[0].DNSSearch)
-	} else if options[0].DNSSearch[0] != ".svc."+kubelet.clusterDomain {
-		t.Errorf("expected domain %s, got %s", ".svc."+kubelet.clusterDomain, options[0].DNSSearch)
-	}
-	if len(options[2].DNS) != 1 {
-		t.Errorf("expected cluster nameserver only, got %+v", options[2].DNS)
-	} else if options[2].DNS[0] != clusterNS {
-		t.Errorf("expected nameserver %s, got %v", clusterNS, options[2].DNS[0])
-	}
-	if len(options[2].DNSSearch) != expLength {
-		t.Errorf("expected prepend of cluster domain, got %+v", options[2].DNSSearch)
-	} else if options[2].DNSSearch[0] != ".svc."+kubelet.clusterDomain {
-		t.Errorf("expected domain %s, got %s", ".svc."+kubelet.clusterDomain, options[0].DNSSearch)
 	}
 }
 
@@ -854,7 +996,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_NAME",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: "v1",
 								FieldPath:  "metadata.name",
 							},
 						},
@@ -863,7 +1005,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_NAMESPACE",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: "v1",
 								FieldPath:  "metadata.namespace",
 							},
 						},
@@ -872,7 +1014,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_NODE_NAME",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: "v1",
 								FieldPath:  "spec.nodeName",
 							},
 						},
@@ -881,7 +1023,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_SERVICE_ACCOUNT_NAME",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: "v1",
 								FieldPath:  "spec.serviceAccountName",
 							},
 						},
@@ -890,7 +1032,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_IP",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: "v1",
 								FieldPath:  "status.podIP",
 							},
 						},
@@ -899,7 +1041,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "HOST_IP",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: "v1",
 								FieldPath:  "status.hostIP",
 							},
 						},
@@ -930,7 +1072,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_NAME",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: "v1",
 								FieldPath:  "metadata.name",
 							},
 						},
@@ -1720,7 +1862,7 @@ func TestPodPhaseWithRestartAlways(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		status := GetPhase(&test.pod.Spec, test.pod.Status.ContainerStatuses)
+		status := getPhase(&test.pod.Spec, test.pod.Status.ContainerStatuses)
 		assert.Equal(t, test.status, status, "[test %s]", test.test)
 	}
 }
@@ -1820,7 +1962,7 @@ func TestPodPhaseWithRestartNever(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		status := GetPhase(&test.pod.Spec, test.pod.Status.ContainerStatuses)
+		status := getPhase(&test.pod.Spec, test.pod.Status.ContainerStatuses)
 		assert.Equal(t, test.status, status, "[test %s]", test.test)
 	}
 }
@@ -1933,7 +2075,7 @@ func TestPodPhaseWithRestartOnFailure(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		status := GetPhase(&test.pod.Spec, test.pod.Status.ContainerStatuses)
+		status := getPhase(&test.pod.Spec, test.pod.Status.ContainerStatuses)
 		assert.Equal(t, test.status, status, "[test %s]", test.test)
 	}
 }
@@ -1952,7 +2094,7 @@ func (f *fakeReadWriteCloser) Close() error {
 	return nil
 }
 
-func TestExec(t *testing.T) {
+func TestGetExec(t *testing.T) {
 	const (
 		podName                = "podFoo"
 		podNamespace           = "nsFoo"
@@ -1963,9 +2105,6 @@ func TestExec(t *testing.T) {
 	var (
 		podFullName = kubecontainer.GetPodFullName(podWithUIDNameNs(podUID, podName, podNamespace))
 		command     = []string{"ls"}
-		stdin       = &bytes.Buffer{}
-		stdout      = &fakeReadWriteCloser{}
-		stderr      = &fakeReadWriteCloser{}
 	)
 
 	testcases := []struct {
@@ -2006,65 +2145,27 @@ func TestExec(t *testing.T) {
 			}},
 		}
 
-		{ // No streaming case
-			description := "no streaming - " + tc.description
-			redirect, err := kubelet.GetExec(tc.podFullName, podUID, tc.container, command, remotecommand.Options{})
-			assert.Error(t, err, description)
-			assert.Nil(t, redirect, description)
+		description := "streaming - " + tc.description
+		fakeRuntime := &containertest.FakeStreamingRuntime{FakeRuntime: testKubelet.fakeRuntime}
+		kubelet.containerRuntime = fakeRuntime
+		kubelet.streamingRuntime = fakeRuntime
 
-			err = kubelet.ExecInContainer(tc.podFullName, podUID, tc.container, command, stdin, stdout, stderr, tty, nil, 0)
+		redirect, err := kubelet.GetExec(tc.podFullName, podUID, tc.container, command, remotecommand.Options{})
+		if tc.expectError {
 			assert.Error(t, err, description)
-		}
-		{ // Direct streaming case
-			description := "direct streaming - " + tc.description
-			fakeRuntime := &containertest.FakeDirectStreamingRuntime{FakeRuntime: testKubelet.fakeRuntime}
-			kubelet.containerRuntime = fakeRuntime
-
-			redirect, err := kubelet.GetExec(tc.podFullName, podUID, tc.container, command, remotecommand.Options{})
+		} else {
 			assert.NoError(t, err, description)
-			assert.Nil(t, redirect, description)
-
-			err = kubelet.ExecInContainer(tc.podFullName, podUID, tc.container, command, stdin, stdout, stderr, tty, nil, 0)
-			if tc.expectError {
-				assert.Error(t, err, description)
-			} else {
-				assert.NoError(t, err, description)
-				assert.Equal(t, fakeRuntime.Args.ContainerID.ID, containerID, description+": ID")
-				assert.Equal(t, fakeRuntime.Args.Cmd, command, description+": Command")
-				assert.Equal(t, fakeRuntime.Args.Stdin, stdin, description+": Stdin")
-				assert.Equal(t, fakeRuntime.Args.Stdout, stdout, description+": Stdout")
-				assert.Equal(t, fakeRuntime.Args.Stderr, stderr, description+": Stderr")
-				assert.Equal(t, fakeRuntime.Args.TTY, tty, description+": TTY")
-			}
-		}
-		{ // Indirect streaming case
-			description := "indirect streaming - " + tc.description
-			fakeRuntime := &containertest.FakeIndirectStreamingRuntime{FakeRuntime: testKubelet.fakeRuntime}
-			kubelet.containerRuntime = fakeRuntime
-
-			redirect, err := kubelet.GetExec(tc.podFullName, podUID, tc.container, command, remotecommand.Options{})
-			if tc.expectError {
-				assert.Error(t, err, description)
-			} else {
-				assert.NoError(t, err, description)
-				assert.Equal(t, containertest.FakeHost, redirect.Host, description+": redirect")
-			}
-
-			err = kubelet.ExecInContainer(tc.podFullName, podUID, tc.container, command, stdin, stdout, stderr, tty, nil, 0)
-			assert.Error(t, err, description)
+			assert.Equal(t, containertest.FakeHost, redirect.Host, description+": redirect")
 		}
 	}
 }
 
-func TestPortForward(t *testing.T) {
+func TestGetPortForward(t *testing.T) {
 	const (
 		podName                = "podFoo"
 		podNamespace           = "nsFoo"
 		podUID       types.UID = "12345678"
 		port         int32     = 5000
-	)
-	var (
-		stream = &fakeReadWriteCloser{}
 	)
 
 	testcases := []struct {
@@ -2097,71 +2198,19 @@ func TestPortForward(t *testing.T) {
 			}},
 		}
 
-		podFullName := kubecontainer.GetPodFullName(podWithUIDNameNs(podUID, tc.podName, podNamespace))
-		{ // No streaming case
-			description := "no streaming - " + tc.description
-			redirect, err := kubelet.GetPortForward(tc.podName, podNamespace, podUID, portforward.V4Options{})
-			assert.Error(t, err, description)
-			assert.Nil(t, redirect, description)
+		description := "streaming - " + tc.description
+		fakeRuntime := &containertest.FakeStreamingRuntime{FakeRuntime: testKubelet.fakeRuntime}
+		kubelet.containerRuntime = fakeRuntime
+		kubelet.streamingRuntime = fakeRuntime
 
-			err = kubelet.PortForward(podFullName, podUID, port, stream)
+		redirect, err := kubelet.GetPortForward(tc.podName, podNamespace, podUID, portforward.V4Options{})
+		if tc.expectError {
 			assert.Error(t, err, description)
-		}
-		{ // Direct streaming case
-			description := "direct streaming - " + tc.description
-			fakeRuntime := &containertest.FakeDirectStreamingRuntime{FakeRuntime: testKubelet.fakeRuntime}
-			kubelet.containerRuntime = fakeRuntime
-
-			redirect, err := kubelet.GetPortForward(tc.podName, podNamespace, podUID, portforward.V4Options{})
+		} else {
 			assert.NoError(t, err, description)
-			assert.Nil(t, redirect, description)
-
-			err = kubelet.PortForward(podFullName, podUID, port, stream)
-			if tc.expectError {
-				assert.Error(t, err, description)
-			} else {
-				assert.NoError(t, err, description)
-				require.Equal(t, fakeRuntime.Args.Pod.ID, podUID, description+": Pod UID")
-				require.Equal(t, fakeRuntime.Args.Port, port, description+": Port")
-				require.Equal(t, fakeRuntime.Args.Stream, stream, description+": stream")
-			}
-		}
-		{ // Indirect streaming case
-			description := "indirect streaming - " + tc.description
-			fakeRuntime := &containertest.FakeIndirectStreamingRuntime{FakeRuntime: testKubelet.fakeRuntime}
-			kubelet.containerRuntime = fakeRuntime
-
-			redirect, err := kubelet.GetPortForward(tc.podName, podNamespace, podUID, portforward.V4Options{})
-			if tc.expectError {
-				assert.Error(t, err, description)
-			} else {
-				assert.NoError(t, err, description)
-				assert.Equal(t, containertest.FakeHost, redirect.Host, description+": redirect")
-			}
-
-			err = kubelet.PortForward(podFullName, podUID, port, stream)
-			assert.Error(t, err, description)
+			assert.Equal(t, containertest.FakeHost, redirect.Host, description+": redirect")
 		}
 	}
-}
-
-// Tests that identify the host port conflicts are detected correctly.
-func TestGetHostPortConflicts(t *testing.T) {
-	pods := []*v1.Pod{
-		{Spec: v1.PodSpec{Containers: []v1.Container{{Ports: []v1.ContainerPort{{HostPort: 80}}}}}},
-		{Spec: v1.PodSpec{Containers: []v1.Container{{Ports: []v1.ContainerPort{{HostPort: 81}}}}}},
-		{Spec: v1.PodSpec{Containers: []v1.Container{{Ports: []v1.ContainerPort{{HostPort: 82}}}}}},
-		{Spec: v1.PodSpec{Containers: []v1.Container{{Ports: []v1.ContainerPort{{HostPort: 83}}}}}},
-	}
-	// Pods should not cause any conflict.
-	assert.False(t, hasHostPortConflicts(pods), "Should not have port conflicts")
-
-	expected := &v1.Pod{
-		Spec: v1.PodSpec{Containers: []v1.Container{{Ports: []v1.ContainerPort{{HostPort: 81}}}}},
-	}
-	// The new pod should cause conflict and be reported.
-	pods = append(pods, expected)
-	assert.True(t, hasHostPortConflicts(pods), "Should have port conflicts")
 }
 
 func TestHasHostMountPVC(t *testing.T) {

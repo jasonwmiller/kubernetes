@@ -16,6 +16,8 @@ go_library(
         "storage.go",
         "util.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/coreos/etcd/raft",
+    importpath = "github.com/coreos/etcd/raft",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/coreos/etcd/raft/raftpb:go_default_library",

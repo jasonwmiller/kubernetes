@@ -76,6 +76,20 @@ func testStackdriverMonitoring(f *framework.Framework, pods, allPodsCPU int, per
 
 	ctx := context.Background()
 	client, err := google.DefaultClient(ctx, gcm.CloudPlatformScope)
+
+	// Hack for running tests locally
+	// If this is your use case, create application default credentials:
+	// $ gcloud auth application-default login
+	// and uncomment following lines (comment out the two lines above): (DON'T set the env var below)
+	/*
+		ts, err := google.DefaultTokenSource(oauth2.NoContext)
+		framework.Logf("Couldn't get application default credentials, %v", err)
+		if err != nil {
+			framework.Failf("Error accessing application default credentials, %v", err)
+		}
+		client := oauth2.NewClient(oauth2.NoContext, ts)
+	*/
+
 	gcmService, err := gcm.New(client)
 
 	// set this env var if accessing Stackdriver test endpoint (default is prod):
@@ -87,7 +101,7 @@ func testStackdriverMonitoring(f *framework.Framework, pods, allPodsCPU int, per
 
 	framework.ExpectNoError(err)
 
-	rc := common.NewDynamicResourceConsumer(rcName, common.KindDeployment, pods, allPodsCPU, memoryUsed, 0, perPodCPU, memoryLimit, f)
+	rc := common.NewDynamicResourceConsumer(rcName, f.Namespace.Name, common.KindDeployment, pods, allPodsCPU, memoryUsed, 0, perPodCPU, memoryLimit, f.ClientSet, f.InternalClientset, f.ScalesGetter)
 	defer rc.CleanUp()
 
 	rc.WaitForReplicas(pods, 15*time.Minute)

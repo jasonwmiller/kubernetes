@@ -17,13 +17,15 @@ limitations under the License.
 package storageclass
 
 import (
+	"context"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/storage/names"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/apis/storage"
+	storageutil "k8s.io/kubernetes/pkg/apis/storage/util"
 	"k8s.io/kubernetes/pkg/apis/storage/validation"
 	"k8s.io/kubernetes/pkg/features"
 )
@@ -36,22 +38,24 @@ type storageClassStrategy struct {
 
 // Strategy is the default logic that applies when creating and updating
 // StorageClass objects via the REST API.
-var Strategy = storageClassStrategy{api.Scheme, names.SimpleNameGenerator}
+var Strategy = storageClassStrategy{legacyscheme.Scheme, names.SimpleNameGenerator}
 
 func (storageClassStrategy) NamespaceScoped() bool {
 	return false
 }
 
 // ResetBeforeCreate clears the Status field which is not allowed to be set by end users on creation.
-func (storageClassStrategy) PrepareForCreate(ctx genericapirequest.Context, obj runtime.Object) {
+func (storageClassStrategy) PrepareForCreate(ctx context.Context, obj runtime.Object) {
 	class := obj.(*storage.StorageClass)
 
 	if !utilfeature.DefaultFeatureGate.Enabled(features.ExpandPersistentVolumes) {
 		class.AllowVolumeExpansion = nil
 	}
+
+	storageutil.DropDisabledAlphaFields(class)
 }
 
-func (storageClassStrategy) Validate(ctx genericapirequest.Context, obj runtime.Object) field.ErrorList {
+func (storageClassStrategy) Validate(ctx context.Context, obj runtime.Object) field.ErrorList {
 	storageClass := obj.(*storage.StorageClass)
 	return validation.ValidateStorageClass(storageClass)
 }
@@ -65,7 +69,7 @@ func (storageClassStrategy) AllowCreateOnUpdate() bool {
 }
 
 // PrepareForUpdate sets the Status fields which is not allowed to be set by an end user updating a PV
-func (storageClassStrategy) PrepareForUpdate(ctx genericapirequest.Context, obj, old runtime.Object) {
+func (storageClassStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {
 	newClass := obj.(*storage.StorageClass)
 	oldClass := old.(*storage.StorageClass)
 
@@ -73,9 +77,11 @@ func (storageClassStrategy) PrepareForUpdate(ctx genericapirequest.Context, obj,
 		newClass.AllowVolumeExpansion = nil
 		oldClass.AllowVolumeExpansion = nil
 	}
+	storageutil.DropDisabledAlphaFields(oldClass)
+	storageutil.DropDisabledAlphaFields(newClass)
 }
 
-func (storageClassStrategy) ValidateUpdate(ctx genericapirequest.Context, obj, old runtime.Object) field.ErrorList {
+func (storageClassStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
 	errorList := validation.ValidateStorageClass(obj.(*storage.StorageClass))
 	return append(errorList, validation.ValidateStorageClassUpdate(obj.(*storage.StorageClass), old.(*storage.StorageClass))...)
 }

@@ -25,7 +25,7 @@ import (
 )
 
 // CreateBasic creates a basic, general KubeConfig object that then can be extended
-func CreateBasic(serverURL string, clusterName string, userName string, caCert []byte) *clientcmdapi.Config {
+func CreateBasic(serverURL, clusterName, userName string, caCert []byte) *clientcmdapi.Config {
 	// Use the cluster and the username as the context name
 	contextName := fmt.Sprintf("%s@%s", userName, clusterName)
 
@@ -72,11 +72,11 @@ func ClientSetFromFile(path string) (*clientset.Clientset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load admin kubeconfig [%v]", err)
 	}
-	return KubeConfigToClientSet(config)
+	return ToClientSet(config)
 }
 
-// KubeConfigToClientSet converts a KubeConfig object to a client
-func KubeConfigToClientSet(config *clientcmdapi.Config) (*clientset.Clientset, error) {
+// ToClientSet converts a KubeConfig object to a client
+func ToClientSet(config *clientcmdapi.Config) (*clientset.Clientset, error) {
 	clientConfig, err := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client configuration from kubeconfig: %v", err)

@@ -3,9 +3,12 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library")
 go_library(
     name = "go_default_library",
     srcs = [
+        "bytestostr.go",
         "error.go",
         "lexer.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/mailru/easyjson/jlexer",
+    importpath = "github.com/mailru/easyjson/jlexer",
     visibility = ["//visibility:public"],
 )
 

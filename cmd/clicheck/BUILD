@@ -8,15 +8,15 @@ load(
 
 go_binary(
     name = "clicheck",
-    library = ":go_default_library",
+    embed = [":go_default_library"],
 )
 
 go_library(
     name = "go_default_library",
     srcs = ["check_cli_conventions.go"],
+    importpath = "k8s.io/kubernetes/cmd/clicheck",
     deps = [
         "//pkg/kubectl/cmd:go_default_library",
-        "//pkg/kubectl/cmd/util:go_default_library",
         "//pkg/kubectl/cmd/util/sanity:go_default_library",
     ],
 )

@@ -15,19 +15,19 @@
 # Build the hyperkube base image. This image is used to build the hyperkube image.
 #
 # Usage:
-#   [ARCH=amd64] [REGISTRY="gcr.io/google-containers"] make (build|push)
+#   [ARCH=amd64] [REGISTRY="staging-k8s.gcr.io"] make (build|push)
 
-REGISTRY?=gcr.io/google-containers
+REGISTRY?=staging-k8s.gcr.io
 IMAGE?=debian-hyperkube-base
-TAG=0.2
+TAG=0.10.1
 ARCH?=amd64
 CACHEBUST?=1
 
-BASEIMAGE=gcr.io/google-containers/debian-base-$(ARCH):0.2
-CNI_RELEASE=0799f5732f2a11b329d9e3d51b9c8f2e3759f2ff
+BASEIMAGE=k8s.gcr.io/debian-base-$(ARCH):0.3.2
+CNI_VERSION=v0.6.0
 
 TEMP_DIR:=$(shell mktemp -d)
-CNI_TARBALL=cni-$(ARCH)-$(CNI_RELEASE).tar.gz
+CNI_TARBALL=cni-plugins-$(ARCH)-$(CNI_VERSION).tgz
 
 .PHONY: all build push clean
 
@@ -48,13 +48,15 @@ ifeq ($(CACHEBUST),1)
 	cd ${TEMP_DIR} && sed -i.back "s|CACHEBUST|$(shell uuidgen)|g" Dockerfile
 endif
 
-	mkdir -p ${TEMP_DIR}/cni-bin
-	tar -xz -C ${TEMP_DIR}/cni-bin -f "cni-tars/${CNI_TARBALL}"
+	mkdir -p ${TEMP_DIR}/cni-bin/bin
+	tar -xz -C ${TEMP_DIR}/cni-bin/bin -f "cni-tars/${CNI_TARBALL}"
 
+ifneq ($(ARCH),amd64)
 	# Register /usr/bin/qemu-ARCH-static as the handler for non-x86 binaries in the kernel
 	docker run --rm --privileged multiarch/qemu-user-static:register --reset
+endif
 	docker build --pull -t $(REGISTRY)/$(IMAGE)-$(ARCH):$(TAG) $(TEMP_DIR)
 	rm -rf $(TEMP_DIR)
 
 push: build
-	gcloud docker -- push $(REGISTRY)/$(IMAGE)-$(ARCH):$(TAG)
+	docker push $(REGISTRY)/$(IMAGE)-$(ARCH):$(TAG)

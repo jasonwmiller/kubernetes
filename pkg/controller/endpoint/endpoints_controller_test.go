@@ -26,6 +26,7 @@ import (
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -34,9 +35,9 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	utiltesting "k8s.io/client-go/util/testing"
-	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/testapi"
 	endptspkg "k8s.io/kubernetes/pkg/api/v1/endpoints"
+	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/controller"
 )
 
@@ -47,7 +48,7 @@ var emptyNodeName string
 func addPods(store cache.Store, namespace string, nPods int, nPorts int, nNotReady int) {
 	for i := 0; i < nPods+nNotReady; i++ {
 		p := &v1.Pod{
-			TypeMeta: metav1.TypeMeta{APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String()},
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1"},
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: namespace,
 				Name:      fmt.Sprintf("pod%d", i),
@@ -80,7 +81,7 @@ func addPods(store cache.Store, namespace string, nPods int, nPorts int, nNotRea
 func addNotReadyPodsWithSpecifiedRestartPolicyAndPhase(store cache.Store, namespace string, nPods int, nPorts int, restartPolicy v1.RestartPolicy, podPhase v1.PodPhase) {
 	for i := 0; i < nPods; i++ {
 		p := &v1.Pod{
-			TypeMeta: metav1.TypeMeta{APIVersion: api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String()},
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1"},
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: namespace,
 				Name:      fmt.Sprintf("pod%d", i),
@@ -109,11 +110,6 @@ func addNotReadyPodsWithSpecifiedRestartPolicyAndPhase(store cache.Store, namesp
 	}
 }
 
-type serverResponse struct {
-	statusCode int
-	obj        interface{}
-}
-
 func makeTestServer(t *testing.T, namespace string) (*httptest.Server, *utiltesting.FakeHandler) {
 	fakeEndpointsHandler := utiltesting.FakeHandler{
 		StatusCode:   http.StatusOK,
@@ -137,7 +133,7 @@ type endpointController struct {
 }
 
 func newController(url string) *endpointController {
-	client := clientset.NewForConfigOrDie(&restclient.Config{Host: url, ContentConfig: restclient.ContentConfig{GroupVersion: &api.Registry.GroupOrDie(v1.GroupName).GroupVersion}})
+	client := clientset.NewForConfigOrDie(&restclient.Config{Host: url, ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}}})
 	informerFactory := informers.NewSharedInformerFactory(client, controller.NoResyncPeriodFunc())
 	endpoints := NewEndpointController(informerFactory.Core().V1().Pods(), informerFactory.Core().V1().Services(),
 		informerFactory.Core().V1().Endpoints(), client)
@@ -752,7 +748,7 @@ func TestSyncEndpointsHeadlessService(t *testing.T) {
 		},
 		Subsets: []v1.EndpointSubset{{
 			Addresses: []v1.EndpointAddress{{IP: "1.2.3.4", NodeName: &emptyNodeName, TargetRef: &v1.ObjectReference{Kind: "Pod", Name: "pod0", Namespace: ns}}},
-			Ports:     []v1.EndpointPort{{Port: 0, Protocol: "TCP"}},
+			Ports:     []v1.EndpointPort{},
 		}},
 	})
 	endpointsHandler.ValidateRequestCount(t, 1)
@@ -1038,6 +1034,13 @@ func TestPodChanged(t *testing.T) {
 		t.Errorf("Expected pod to be changed with pod readiness change")
 	}
 	oldPod.Status.Conditions = saveConditions
+
+	now := metav1.NewTime(time.Now().UTC())
+	newPod.ObjectMeta.DeletionTimestamp = &now
+	if !podChanged(oldPod, newPod) {
+		t.Errorf("Expected pod to be changed with DeletionTimestamp change")
+	}
+	newPod.ObjectMeta.DeletionTimestamp = oldPod.ObjectMeta.DeletionTimestamp.DeepCopy()
 }
 
 func TestDetermineNeededServiceUpdates(t *testing.T) {

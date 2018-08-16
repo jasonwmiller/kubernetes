@@ -8,6 +8,8 @@ go_library(
         "parser.go",
         "types.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/Nvveen/Gotty",
+    importpath = "github.com/Nvveen/Gotty",
     visibility = ["//visibility:public"],
 )
 

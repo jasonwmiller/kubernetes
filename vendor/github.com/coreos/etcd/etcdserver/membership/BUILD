@@ -4,10 +4,13 @@ go_library(
     name = "go_default_library",
     srcs = [
         "cluster.go",
+        "doc.go",
         "errors.go",
         "member.go",
         "store.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/coreos/etcd/etcdserver/membership",
+    importpath = "github.com/coreos/etcd/etcdserver/membership",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/coreos/etcd/error:go_default_library",

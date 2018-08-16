@@ -7,17 +7,14 @@ go_library(
         "api.pb.go",
         "status.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/libopenstorage/openstorage/api",
+    importpath = "github.com/libopenstorage/openstorage/api",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/golang/protobuf/proto:go_default_library",
-        "//vendor/go.pedge.io/pb/go/google/protobuf:go_default_library",
+        "//vendor/github.com/mohae/deepcopy:go_default_library",
+        "@io_bazel_rules_go//proto/wkt:timestamp_go_proto",
     ],
-)
-
-filegroup(
-    name = "go_default_library_protos",
-    srcs = ["api.proto"],
-    visibility = ["//visibility:public"],
 )
 
 filegroup(

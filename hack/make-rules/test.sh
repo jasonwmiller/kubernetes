@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2014 The Kubernetes Authors.
 #
@@ -57,6 +57,7 @@ kube::test::find_dirs() {
           -o -path './target/*' \
           -o -path './test/e2e/*' \
           -o -path './test/e2e_node/*' \
+          -o -path './test/e2e_kubeadm/*' \
           -o -path './test/integration/*' \
           -o -path './third_party/*' \
           -o -path './staging/*' \
@@ -112,7 +113,7 @@ KUBE_GOVERALLS_BIN=${KUBE_GOVERALLS_BIN:-}
 # "v1,compute/v1alpha1,experimental/v1alpha2;v1,compute/v2,experimental/v1alpha3"
 # FIXME: due to current implementation of a test client (see: pkg/api/testapi/testapi.go)
 # ONLY the last version is tested in each group.
-ALL_VERSIONS_CSV=$(IFS=',';echo "${KUBE_AVAILABLE_GROUP_VERSIONS[*]// /,}";IFS=$),federation/v1beta1
+ALL_VERSIONS_CSV=$(IFS=',';echo "${KUBE_AVAILABLE_GROUP_VERSIONS[*]// /,}";IFS=$)
 KUBE_TEST_API_VERSIONS="${KUBE_TEST_API_VERSIONS:-${ALL_VERSIONS_CSV}}"
 # once we have multiple group supports
 # Create a junit-style XML test report in this directory if set.
@@ -211,6 +212,41 @@ junitFilenamePrefix() {
   echo "${KUBE_JUNIT_REPORT_DIR}/junit_${KUBE_TEST_API_HASH}_$(kube::util::sortable_date)"
 }
 
+verifyAndSuggestPackagePath() {
+  local specified_package_path="$1"
+  local alternative_package_path="$2"
+  local original_package_path="$3"
+  local suggestion_package_path="$4"
+
+  if ! [ -d "$specified_package_path" ]; then
+    # Because k8s sets a localized $GOPATH for testing, seeing the actual
+    # directory can be confusing. Instead, just show $GOPATH if it exists in the
+    # $specified_package_path.
+    local printable_package_path=$(echo "$specified_package_path" | sed "s|$GOPATH|\$GOPATH|")
+    kube::log::error "specified test path '$printable_package_path' does not exist"
+
+    if [ -d "$alternative_package_path" ]; then
+      kube::log::info "try changing \"$original_package_path\" to \"$suggestion_package_path\""
+    fi
+    exit 1
+  fi
+}
+
+verifyPathsToPackagesUnderTest() {
+  local packages_under_test=($@)
+
+  for package_path in "${packages_under_test[@]}"; do
+    local local_package_path="$package_path"
+    local go_package_path="$GOPATH/src/$package_path"
+
+    if [[ "${package_path:0:2}" == "./" ]] ; then
+      verifyAndSuggestPackagePath "$local_package_path" "$go_package_path" "$package_path" "${package_path:2}"
+    else
+      verifyAndSuggestPackagePath "$go_package_path" "$local_package_path" "$package_path" "./$package_path"
+    fi
+  done
+}
+
 produceJUnitXMLReport() {
   local -r junit_filename_prefix=$1
   if [[ -z "${junit_filename_prefix}" ]]; then
@@ -237,21 +273,17 @@ runTests() {
   local junit_filename_prefix
   junit_filename_prefix=$(junitFilenamePrefix)
 
+  verifyPathsToPackagesUnderTest "$@"
+
   # If we're not collecting coverage, run all requested tests with one 'go test'
   # command, which is much faster.
   if [[ ! ${KUBE_COVER} =~ ^[yY]$ ]]; then
     kube::log::status "Running tests without code coverage"
-    # `go test` does not install the things it builds. `go test -i` installs
-    # the build artifacts but doesn't run the tests.  The two together provide
-    # a large speedup for tests that do not need to be rebuilt.
-    go test -i "${goflags[@]:+${goflags[@]}}" \
-      ${KUBE_RACE} ${KUBE_TIMEOUT} "${@}" \
-     "${testargs[@]:+${testargs[@]}}"
     go test "${goflags[@]:+${goflags[@]}}" \
       ${KUBE_RACE} ${KUBE_TIMEOUT} "${@}" \
      "${testargs[@]:+${testargs[@]}}" \
      | tee ${junit_filename_prefix:+"${junit_filename_prefix}.stdout"} \
-     | grep "${go_test_grep_pattern}" && rc=$? || rc=$?
+     | grep --binary-files=text "${go_test_grep_pattern}" && rc=$? || rc=$?
     produceJUnitXMLReport "${junit_filename_prefix}"
     return ${rc}
   fi
@@ -282,21 +314,11 @@ runTests() {
   for path in $(echo $cover_ignore_dirs | sed 's/|/ /g'); do
       echo -e "skipped\tk8s.io/kubernetes/$path"
   done
-  #
-  # `go test` does not install the things it builds. `go test -i` installs
-  # the build artifacts but doesn't run the tests.  The two together provide
-  # a large speedup for tests that do not need to be rebuilt.
+
   printf "%s\n" "${@}" \
     | grep -Ev $cover_ignore_dirs \
     | xargs -I{} -n 1 -P ${KUBE_COVERPROCS} \
     bash -c "set -o pipefail; _pkg=\"\$0\"; _pkg_out=\${_pkg//\//_}; \
-      go test -i ${goflags[@]:+${goflags[@]}} \
-        ${KUBE_RACE} \
-        ${KUBE_TIMEOUT} \
-        -cover -covermode=\"${KUBE_COVERMODE}\" \
-        -coverprofile=\"${cover_report_dir}/\${_pkg}/${cover_profile}\" \
-        \"\${_pkg}\" \
-        ${testargs[@]:+${testargs[@]}}
       go test ${goflags[@]:+${goflags[@]}} \
         ${KUBE_RACE} \
         ${KUBE_TIMEOUT} \

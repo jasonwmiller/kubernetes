@@ -22,11 +22,11 @@ import (
 	"sync"
 	"time"
 
-	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/v1alpha1/runtime"
+	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 )
 
 var (
-	version = "0.1.0"
+	FakeVersion = "0.1.0"
 
 	FakeRuntimeName  = "fakeRuntime"
 	FakePodSandboxIP = "192.168.192.168"
@@ -49,6 +49,7 @@ type FakeRuntimeService struct {
 	sync.Mutex
 
 	Called []string
+	Errors map[string][]error
 
 	FakeStatus         *runtimeapi.RuntimeStatus
 	Containers         map[string]*FakeContainer
@@ -101,9 +102,29 @@ func (r *FakeRuntimeService) AssertCalls(calls []string) error {
 	return nil
 }
 
+func (r *FakeRuntimeService) InjectError(f string, err error) {
+	r.Lock()
+	defer r.Unlock()
+	r.Errors[f] = append(r.Errors[f], err)
+}
+
+// caller of popError must grab a lock.
+func (r *FakeRuntimeService) popError(f string) error {
+	if r.Errors == nil {
+		return nil
+	}
+	errs := r.Errors[f]
+	if len(errs) == 0 {
+		return nil
+	}
+	err, errs := errs[0], errs[1:]
+	return err
+}
+
 func NewFakeRuntimeService() *FakeRuntimeService {
 	return &FakeRuntimeService{
 		Called:             make([]string, 0),
+		Errors:             make(map[string][]error),
 		Containers:         make(map[string]*FakeContainer),
 		Sandboxes:          make(map[string]*FakePodSandbox),
 		FakeContainerStats: make(map[string]*runtimeapi.ContainerStats),
@@ -117,10 +138,10 @@ func (r *FakeRuntimeService) Version(apiVersion string) (*runtimeapi.VersionResp
 	r.Called = append(r.Called, "Version")
 
 	return &runtimeapi.VersionResponse{
-		Version:           version,
+		Version:           FakeVersion,
 		RuntimeName:       FakeRuntimeName,
-		RuntimeVersion:    version,
-		RuntimeApiVersion: version,
+		RuntimeVersion:    FakeVersion,
+		RuntimeApiVersion: FakeVersion,
 	}, nil
 }
 
@@ -418,20 +439,20 @@ func (r *FakeRuntimeService) SetFakeContainerStats(containerStats []*runtimeapi.
 	}
 }
 
-func (r *FakeRuntimeService) ContainerStats(req *runtimeapi.ContainerStatsRequest) (*runtimeapi.ContainerStatsResponse, error) {
+func (r *FakeRuntimeService) ContainerStats(containerID string) (*runtimeapi.ContainerStats, error) {
 	r.Lock()
 	defer r.Unlock()
 
 	r.Called = append(r.Called, "ContainerStats")
 
-	s, found := r.FakeContainerStats[req.ContainerId]
+	s, found := r.FakeContainerStats[containerID]
 	if !found {
-		return nil, fmt.Errorf("no stats for container %q", req.ContainerId)
+		return nil, fmt.Errorf("no stats for container %q", containerID)
 	}
-	return &runtimeapi.ContainerStatsResponse{Stats: s}, nil
+	return s, nil
 }
 
-func (r *FakeRuntimeService) ListContainerStats(req *runtimeapi.ListContainerStatsRequest) (*runtimeapi.ListContainerStatsResponse, error) {
+func (r *FakeRuntimeService) ListContainerStats(filter *runtimeapi.ContainerStatsFilter) ([]*runtimeapi.ContainerStats, error) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -439,14 +460,14 @@ func (r *FakeRuntimeService) ListContainerStats(req *runtimeapi.ListContainerSta
 
 	var result []*runtimeapi.ContainerStats
 	for _, c := range r.Containers {
-		if req.Filter != nil {
-			if req.Filter.Id != "" && req.Filter.Id != c.Id {
+		if filter != nil {
+			if filter.Id != "" && filter.Id != c.Id {
 				continue
 			}
-			if req.Filter.PodSandboxId != "" && req.Filter.PodSandboxId != c.SandboxID {
+			if filter.PodSandboxId != "" && filter.PodSandboxId != c.SandboxID {
 				continue
 			}
-			if req.Filter.LabelSelector != nil && !filterInLabels(req.Filter.LabelSelector, c.GetLabels()) {
+			if filter.LabelSelector != nil && !filterInLabels(filter.LabelSelector, c.GetLabels()) {
 				continue
 			}
 		}
@@ -457,5 +478,18 @@ func (r *FakeRuntimeService) ListContainerStats(req *runtimeapi.ListContainerSta
 		result = append(result, s)
 	}
 
-	return &runtimeapi.ListContainerStatsResponse{Stats: result}, nil
+	return result, nil
+}
+
+func (r *FakeRuntimeService) ReopenContainerLog(containerID string) error {
+	r.Lock()
+	defer r.Unlock()
+
+	r.Called = append(r.Called, "ReopenContainerLog")
+
+	if err := r.popError("ReopenContainerLog"); err != nil {
+		return err
+	}
+
+	return nil
 }

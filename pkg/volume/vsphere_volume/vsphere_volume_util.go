@@ -93,10 +93,13 @@ func (util *VsphereDiskUtil) CreateVolume(v *vsphereVolumeProvisioner) (volSpec 
 	capacity := v.options.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
 	volSizeBytes := capacity.Value()
 	// vSphere works with kilobytes, convert to KiB with rounding up
-	volSizeKB := int(volume.RoundUpSize(volSizeBytes, 1024))
-	name := volume.GenerateVolumeName(v.options.ClusterName, v.options.PVName, 255)
+	volSizeKiB, err := volumeutil.RoundUpSizeInt(volSizeBytes, 1024)
+	if err != nil {
+		return nil, err
+	}
+	name := volumeutil.GenerateVolumeName(v.options.ClusterName, v.options.PVName, 255)
 	volumeOptions := &vclib.VolumeOptions{
-		CapacityKB: volSizeKB,
+		CapacityKB: volSizeKiB,
 		Tags:       *v.options.CloudTags,
 		Name:       name,
 	}
@@ -146,7 +149,7 @@ func (util *VsphereDiskUtil) CreateVolume(v *vsphereVolumeProvisioner) (volSpec 
 	}
 	volSpec = &VolumeSpec{
 		Path:              vmDiskPath,
-		Size:              volSizeKB,
+		Size:              volSizeKiB,
 		Fstype:            fstype,
 		StoragePolicyName: volumeOptions.StoragePolicyName,
 		StoragePolicyID:   volumeOptions.StoragePolicyID,
@@ -170,7 +173,7 @@ func (util *VsphereDiskUtil) DeleteVolume(vd *vsphereVolumeDeleter) error {
 	return nil
 }
 
-func getVolPathfromDeviceMountPath(deviceMountPath string) string {
+func getVolPathfromVolumeName(deviceMountPath string) string {
 	// Assumption: No file or folder is named starting with '[' in datastore
 	volPath := deviceMountPath[strings.LastIndex(deviceMountPath, "["):]
 	// space between datastore and vmdk name in volumePath is encoded as '\040' when returned by GetMountRefs().
@@ -185,8 +188,8 @@ func getCloudProvider(cloud cloudprovider.Interface) (*vsphere.VSphere, error) {
 		return nil, errors.New("Cloud provider not initialized properly")
 	}
 
-	vs := cloud.(*vsphere.VSphere)
-	if vs == nil {
+	vs, ok := cloud.(*vsphere.VSphere)
+	if !ok || vs == nil {
 		return nil, errors.New("Invalid cloud provider: expected vSphere")
 	}
 	return vs, nil

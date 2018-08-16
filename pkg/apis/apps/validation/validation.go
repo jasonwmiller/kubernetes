@@ -18,15 +18,15 @@ package validation
 
 import (
 	"fmt"
-	"reflect"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	unversionedvalidation "k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	"k8s.io/kubernetes/pkg/api"
-	apivalidation "k8s.io/kubernetes/pkg/api/validation"
 	"k8s.io/kubernetes/pkg/apis/apps"
+	api "k8s.io/kubernetes/pkg/apis/core"
+	apivalidation "k8s.io/kubernetes/pkg/apis/core/validation"
 )
 
 // ValidateStatefulSetName can be used to check whether the given StatefulSet name is valid.
@@ -94,7 +94,6 @@ func ValidateStatefulSetSpec(spec *apps.StatefulSetSpec, fldPath *field.Path) fi
 					int64(spec.UpdateStrategy.RollingUpdate.Partition),
 					fldPath.Child("updateStrategy").Child("rollingUpdate").Child("partition"))...)
 		}
-
 	default:
 		allErrs = append(allErrs,
 			field.Invalid(fldPath.Child("updateStrategy"), spec.UpdateStrategy,
@@ -109,7 +108,7 @@ func ValidateStatefulSetSpec(spec *apps.StatefulSetSpec, fldPath *field.Path) fi
 	} else {
 		allErrs = append(allErrs, unversionedvalidation.ValidateLabelSelector(spec.Selector, fldPath.Child("selector"))...)
 		if len(spec.Selector.MatchLabels)+len(spec.Selector.MatchExpressions) == 0 {
-			allErrs = append(allErrs, field.Invalid(fldPath.Child("selector"), spec.Selector, "empty selector is not valid for statefulset."))
+			allErrs = append(allErrs, field.Invalid(fldPath.Child("selector"), spec.Selector, "empty selector is invalid for statefulset"))
 		}
 	}
 
@@ -124,7 +123,7 @@ func ValidateStatefulSetSpec(spec *apps.StatefulSetSpec, fldPath *field.Path) fi
 		allErrs = append(allErrs, field.NotSupported(fldPath.Child("template", "spec", "restartPolicy"), spec.Template.Spec.RestartPolicy, []string{string(api.RestartPolicyAlways)}))
 	}
 	if spec.Template.Spec.ActiveDeadlineSeconds != nil {
-		allErrs = append(allErrs, field.Invalid(fldPath.Child("spec", "activeDeadlineSeconds"), spec.Template.Spec.ActiveDeadlineSeconds, "must not be specified"))
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("template", "spec", "activeDeadlineSeconds"), spec.Template.Spec.ActiveDeadlineSeconds, "must not be specified"))
 	}
 
 	return allErrs
@@ -150,8 +149,8 @@ func ValidateStatefulSetUpdate(statefulSet, oldStatefulSet *apps.StatefulSet) fi
 	restoreStrategy := statefulSet.Spec.UpdateStrategy
 	statefulSet.Spec.UpdateStrategy = oldStatefulSet.Spec.UpdateStrategy
 
-	if !reflect.DeepEqual(statefulSet.Spec, oldStatefulSet.Spec) {
-		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec"), "updates to statefulset spec for fields other than 'replicas', 'template', and 'updateStrategy' are forbidden."))
+	if !apiequality.Semantic.DeepEqual(statefulSet.Spec, oldStatefulSet.Spec) {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec"), "updates to statefulset spec for fields other than 'replicas', 'template', and 'updateStrategy' are forbidden"))
 	}
 	statefulSet.Spec.Replicas = restoreReplicas
 	statefulSet.Spec.Template = restoreTemplate
@@ -196,6 +195,13 @@ func ValidateStatefulSetStatusUpdate(statefulSet, oldStatefulSet *apps.StatefulS
 	allErrs = append(allErrs, ValidateStatefulSetStatus(&statefulSet.Status, field.NewPath("status"))...)
 	allErrs = append(allErrs, apivalidation.ValidateObjectMetaUpdate(&statefulSet.ObjectMeta, &oldStatefulSet.ObjectMeta, field.NewPath("metadata"))...)
 	// TODO: Validate status.
+	if apivalidation.IsDecremented(statefulSet.Status.CollisionCount, oldStatefulSet.Status.CollisionCount) {
+		value := int32(0)
+		if statefulSet.Status.CollisionCount != nil {
+			value = *statefulSet.Status.CollisionCount
+		}
+		allErrs = append(allErrs, field.Invalid(field.NewPath("status").Child("collisionCount"), value, "cannot be decremented"))
+	}
 	return allErrs
 }
 

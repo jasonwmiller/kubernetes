@@ -317,7 +317,7 @@ func (c *sioClient) IID() (string, error) {
 }
 
 // getGuid returns instance GUID, if not set using resource labels
-// it attemps to fallback to using drv_cfg binary
+// it attempts to fallback to using drv_cfg binary
 func (c *sioClient) getGuid() (string, error) {
 	if c.sdcGuid == "" {
 		glog.V(4).Info(log("sdc guid label not set, falling back to using drv_cfg"))
@@ -339,10 +339,14 @@ func (c *sioClient) getGuid() (string, error) {
 func (c *sioClient) getSioDiskPaths() ([]os.FileInfo, error) {
 	files, err := ioutil.ReadDir(sioDiskIDPath)
 	if err != nil {
-		glog.Error(log("failed to ReadDir %s: %v", sioDiskIDPath, err))
-		return nil, err
+		if os.IsNotExist(err) {
+			// sioDiskIDPath may not exist yet which is fine
+			return []os.FileInfo{}, nil
+		} else {
+			glog.Error(log("failed to ReadDir %s: %v", sioDiskIDPath, err))
+			return nil, err
+		}
 	}
-
 	result := []os.FileInfo{}
 	for _, file := range files {
 		if c.diskRegex.MatchString(file.Name()) {
@@ -373,49 +377,25 @@ func (c *sioClient) GetVolumeRefs(volId sioVolumeID) (refs int, err error) {
 func (c *sioClient) Devs() (map[string]string, error) {
 	volumeMap := make(map[string]string)
 
-	// grab the sdc tool output
-	out, err := c.exec.Run(c.getSdcCmd(), "--query_vols")
-	if err != nil {
-		glog.Error(log("sdc --query_vols failed: %v", err))
-		return nil, err
-	}
-
-	// --query_vols output is a heading followed by list of attached vols as follows:
-	// Retrieve ? volume(s)
-	// VOL-ID a2b8419300000000 MDM-ID 788d9efb0a8f20cb
-	// ...
-	// parse output and store it in a map as  map[<mdmID-volID>]volID
-	// that map is used later to retrieve device path (next section)
-	result := string(out)
-	mdmMap := make(map[string]string)
-	lines := strings.Split(result, "\n")
-	for _, line := range lines {
-		//line e.g.: "VOL-ID a2b8419300000000 MDM-ID 788d9efb0a8f20cb"
-		if strings.HasPrefix(line, "VOL-ID") {
-			//split[1] = volID; split[3] = mdmID
-			split := strings.Split(line, " ")
-			key := fmt.Sprintf("%s-%s", split[3], split[1])
-			mdmMap[key] = split[1]
-		}
-	}
-
 	files, err := c.getSioDiskPaths()
 	if err != nil {
 		return nil, err
 	}
 
 	for _, f := range files {
-		// remove emec-vol- prefix to be left with concated mdmID-volID
-		mdmVolumeID := strings.Replace(f.Name(), "emc-vol-", "", 1)
+		// split emc-vol-<mdmID>-<volumeID> to pull out volumeID
+		parts := strings.Split(f.Name(), "-")
+		if len(parts) != 4 {
+			return nil, errors.New("unexpected ScaleIO device name format")
+		}
+		volumeID := parts[3]
 		devPath, err := filepath.EvalSymlinks(fmt.Sprintf("%s/%s", sioDiskIDPath, f.Name()))
 		if err != nil {
 			glog.Error(log("devicepath-to-volID mapping error: %v", err))
 			return nil, err
 		}
-		// map volID to devicePath
-		if volumeID, ok := mdmMap[mdmVolumeID]; ok {
-			volumeMap[volumeID] = devPath
-		}
+		// map volumeID to devicePath
+		volumeMap[volumeID] = devPath
 	}
 	return volumeMap, nil
 }
@@ -430,7 +410,7 @@ func (c *sioClient) WaitForAttachedDevice(token string) (string, error) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	timer := time.NewTimer(30 * time.Second)
-	defer ticker.Stop()
+	defer timer.Stop()
 
 	for {
 		select {
@@ -441,7 +421,7 @@ func (c *sioClient) WaitForAttachedDevice(token string) (string, error) {
 				return "", err
 			}
 			go func() {
-				glog.V(4).Infof(log("waiting for volume %s to be mapped/attached", token))
+				glog.V(4).Info(log("waiting for volume %s to be mapped/attached", token))
 			}()
 			if path, ok := devMap[token]; ok {
 				glog.V(4).Info(log("device %s mapped to vol %s", path, token))
@@ -464,7 +444,7 @@ func (c *sioClient) WaitForDetachedDevice(token string) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	timer := time.NewTimer(30 * time.Second)
-	defer ticker.Stop()
+	defer timer.Stop()
 
 	for {
 		select {
@@ -475,7 +455,7 @@ func (c *sioClient) WaitForDetachedDevice(token string) error {
 				return err
 			}
 			go func() {
-				glog.V(4).Infof(log("waiting for volume %s to be unmapped/detached", token))
+				glog.V(4).Info(log("waiting for volume %s to be unmapped/detached", token))
 			}()
 			// cant find vol id, then ok.
 			if _, ok := devMap[token]; !ok {

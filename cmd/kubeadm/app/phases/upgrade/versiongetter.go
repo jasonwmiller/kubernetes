@@ -86,7 +86,7 @@ func (g *KubeVersionGetter) KubeadmVersion() (string, *versionutil.Version, erro
 func (g *KubeVersionGetter) VersionFromCILabel(ciVersionLabel, description string) (string, *versionutil.Version, error) {
 	versionStr, err := kubeadmutil.KubernetesReleaseVersion(ciVersionLabel)
 	if err != nil {
-		return "", nil, fmt.Errorf("Couldn't fetch latest %s version from the internet: %v", description, err)
+		return "", nil, fmt.Errorf("Couldn't fetch latest %s from the internet: %v", description, err)
 	}
 
 	if description != "" {
@@ -95,7 +95,7 @@ func (g *KubeVersionGetter) VersionFromCILabel(ciVersionLabel, description strin
 
 	ver, err := versionutil.ParseSemantic(versionStr)
 	if err != nil {
-		return "", nil, fmt.Errorf("Couldn't parse latest %s version: %v", description, err)
+		return "", nil, fmt.Errorf("Couldn't parse latest %s: %v", description, err)
 	}
 	return versionStr, ver, nil
 }
@@ -121,4 +121,31 @@ func computeKubeletVersions(nodes []v1.Node) map[string]uint16 {
 		kubeletVersions[kver]++
 	}
 	return kubeletVersions
+}
+
+// OfflineVersionGetter will use the version provided or
+type OfflineVersionGetter struct {
+	VersionGetter
+	version string
+}
+
+// NewOfflineVersionGetter wraps a VersionGetter and skips online communication if default information is supplied.
+// Version can be "" and the behavior will be identical to the versionGetter passed in.
+func NewOfflineVersionGetter(versionGetter VersionGetter, version string) VersionGetter {
+	return &OfflineVersionGetter{
+		VersionGetter: versionGetter,
+		version:       version,
+	}
+}
+
+// VersionFromCILabel will return the version that was passed into the struct
+func (o *OfflineVersionGetter) VersionFromCILabel(ciVersionLabel, description string) (string, *versionutil.Version, error) {
+	if o.version == "" {
+		return o.VersionGetter.VersionFromCILabel(ciVersionLabel, description)
+	}
+	ver, err := versionutil.ParseSemantic(o.version)
+	if err != nil {
+		return "", nil, fmt.Errorf("Couldn't parse version %s: %v", description, err)
+	}
+	return o.version, ver, nil
 }

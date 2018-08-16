@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -100,7 +100,7 @@ func (i *InstanceMetadata) queryMetadataBytes(path, format string) ([]byte, erro
 
 	q := req.URL.Query()
 	q.Add("format", format)
-	q.Add("api-version", "2017-04-02")
+	q.Add("api-version", "2017-12-01")
 	req.URL.RawQuery = q.Encode()
 
 	resp, err := client.Do(req)

@@ -22,16 +22,18 @@ import (
 	"os"
 	"time"
 
+	"github.com/golang/glog"
+
+	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
-	extensions "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kuberuntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime"
 	clientset "k8s.io/client-go/kubernetes"
+	clientscheme "k8s.io/client-go/kubernetes/scheme"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	"k8s.io/kubernetes/cmd/kubeadm/app/features"
 	"k8s.io/kubernetes/cmd/kubeadm/app/util/apiclient"
-	"k8s.io/kubernetes/pkg/api"
 )
 
 const (
@@ -54,12 +56,13 @@ const (
 // 8. In order to avoid race conditions, we have to make sure that static pod is deleted correctly before we continue
 //      Otherwise, there is a race condition when we proceed without kubelet having restarted the API server correctly and the next .Create call flakes
 // 9. Do that for the kube-apiserver, kube-controller-manager and kube-scheduler in a loop
-func CreateSelfHostedControlPlane(manifestsDir, kubeConfigDir string, cfg *kubeadmapi.MasterConfiguration, client clientset.Interface, waiter apiclient.Waiter) error {
-
+func CreateSelfHostedControlPlane(manifestsDir, kubeConfigDir string, cfg *kubeadmapi.InitConfiguration, client clientset.Interface, waiter apiclient.Waiter, dryRun bool) error {
+	glog.V(1).Infoln("creating self hosted control plane")
 	// Adjust the timeout slightly to something self-hosting specific
 	waiter.SetTimeout(selfHostingWaitTimeout)
 
-	// Here the map of different mutators to use for the control plane's podspec is stored
+	// Here the map of different mutators to use for the control plane's PodSpec is stored
+	glog.V(1).Infoln("getting mutators")
 	mutators := GetMutatorsFromFeatureGates(cfg.FeatureGates)
 
 	// Some extra work to be done if we should store the control plane certificates in Secrets
@@ -84,7 +87,7 @@ func CreateSelfHostedControlPlane(manifestsDir, kubeConfigDir string, cfg *kubea
 			continue
 		}
 
-		// Load the Static Pod file in order to be able to create a self-hosted variant of that file
+		// Load the Static Pod spec in order to be able to create a self-hosted variant of that file
 		podSpec, err := loadPodSpecFromFile(manifestPath)
 		if err != nil {
 			return err
@@ -105,15 +108,17 @@ func CreateSelfHostedControlPlane(manifestsDir, kubeConfigDir string, cfg *kubea
 			return err
 		}
 
-		// Remove the old Static Pod manifest
-		if err := os.RemoveAll(manifestPath); err != nil {
-			return fmt.Errorf("unable to delete static pod manifest for %s [%v]", componentName, err)
+		// Remove the old Static Pod manifest if not dryrunning
+		if !dryRun {
+			if err := os.RemoveAll(manifestPath); err != nil {
+				return fmt.Errorf("unable to delete static pod manifest for %s [%v]", componentName, err)
+			}
 		}
 
 		// Wait for the mirror Pod hash to be removed; otherwise we'll run into race conditions here when the kubelet hasn't had time to
-		// remove the Static Pod (or the mirror Pod respectively). This implicitely also tests that the API server endpoint is healthy,
+		// remove the Static Pod (or the mirror Pod respectively). This implicitly also tests that the API server endpoint is healthy,
 		// because this blocks until the API server returns a 404 Not Found when getting the Static Pod
-		staticPodName := fmt.Sprintf("%s-%s", componentName, cfg.NodeName)
+		staticPodName := fmt.Sprintf("%s-%s", componentName, cfg.NodeRegistration.Name)
 		if err := waiter.WaitForPodToDisappear(staticPodName); err != nil {
 			return err
 		}
@@ -128,48 +133,35 @@ func CreateSelfHostedControlPlane(manifestsDir, kubeConfigDir string, cfg *kubea
 	return nil
 }
 
-// BuildDaemonSet is responsible for mutating the PodSpec and return a DaemonSet which is suitable for the self-hosting purporse
-func BuildDaemonSet(name string, podSpec *v1.PodSpec, mutators map[string][]PodSpecMutatorFunc) *extensions.DaemonSet {
+// BuildDaemonSet is responsible for mutating the PodSpec and returns a DaemonSet which is suitable for self-hosting
+func BuildDaemonSet(name string, podSpec *v1.PodSpec, mutators map[string][]PodSpecMutatorFunc) *apps.DaemonSet {
 
 	// Mutate the PodSpec so it's suitable for self-hosting
 	mutatePodSpec(mutators, name, podSpec)
 
 	// Return a DaemonSet based on that Spec
-	return &extensions.DaemonSet{
+	return &apps.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kubeadmconstants.AddSelfHostedPrefix(name),
 			Namespace: metav1.NamespaceSystem,
 			Labels:    BuildSelfhostedComponentLabels(name),
 		},
-		Spec: extensions.DaemonSetSpec{
+		Spec: apps.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: BuildSelfhostedComponentLabels(name),
+			},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: BuildSelfhostedComponentLabels(name),
 				},
 				Spec: *podSpec,
 			},
-			UpdateStrategy: extensions.DaemonSetUpdateStrategy{
+			UpdateStrategy: apps.DaemonSetUpdateStrategy{
 				// Make the DaemonSet utilize the RollingUpdate rollout strategy
-				Type: extensions.RollingUpdateDaemonSetStrategyType,
+				Type: apps.RollingUpdateDaemonSetStrategyType,
 			},
 		},
 	}
-}
-
-// loadPodSpecFromFile reads and decodes a file containing a specification of a Pod
-// TODO: Consider using "k8s.io/kubernetes/pkg/volume/util".LoadPodFromFile(filename string) in the future instead.
-func loadPodSpecFromFile(manifestPath string) (*v1.PodSpec, error) {
-	podBytes, err := ioutil.ReadFile(manifestPath)
-	if err != nil {
-		return nil, err
-	}
-
-	staticPod := &v1.Pod{}
-	if err := kuberuntime.DecodeInto(api.Codecs.UniversalDecoder(), podBytes, staticPod); err != nil {
-		return nil, fmt.Errorf("unable to decode static pod %v", err)
-	}
-
-	return &staticPod.Spec, nil
 }
 
 // BuildSelfhostedComponentLabels returns the labels for a self-hosted component
@@ -182,4 +174,24 @@ func BuildSelfhostedComponentLabels(component string) map[string]string {
 // BuildSelfHostedComponentLabelQuery creates the right query for matching a self-hosted Pod
 func BuildSelfHostedComponentLabelQuery(componentName string) string {
 	return fmt.Sprintf("k8s-app=%s", kubeadmconstants.AddSelfHostedPrefix(componentName))
+}
+
+func loadPodSpecFromFile(filePath string) (*v1.PodSpec, error) {
+	podDef, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file path %s: %+v", filePath, err)
+	}
+
+	if len(podDef) == 0 {
+		return nil, fmt.Errorf("file was empty: %s", filePath)
+	}
+
+	codec := clientscheme.Codecs.UniversalDecoder()
+	pod := &v1.Pod{}
+
+	if err = runtime.DecodeInto(codec, podDef, pod); err != nil {
+		return nil, fmt.Errorf("failed decoding pod: %v", err)
+	}
+
+	return &pod.Spec, nil
 }

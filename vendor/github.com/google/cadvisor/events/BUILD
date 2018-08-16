@@ -3,6 +3,8 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library")
 go_library(
     name = "go_default_library",
     srcs = ["handler.go"],
+    importmap = "k8s.io/kubernetes/vendor/github.com/google/cadvisor/events",
+    importpath = "github.com/google/cadvisor/events",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/golang/glog:go_default_library",

@@ -22,12 +22,14 @@ import (
 	"github.com/renstrom/dedent"
 	"github.com/spf13/cobra"
 
-	"k8s.io/apiserver/pkg/util/flag"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/upgrade"
+	// Register the kubeadm configuration types because CLI flag generation
+	// depends on the generated defaults.
 )
 
-func NewKubeadmCommand(_ io.Reader, out, err io.Writer) *cobra.Command {
+// NewKubeadmCommand returns cobra.Command to run kubeadm command
+func NewKubeadmCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 	cmds := &cobra.Command{
 		Use:   "kubeadm",
 		Short: "kubeadm: easily bootstrap a secure Kubernetes cluster",
@@ -35,28 +37,29 @@ func NewKubeadmCommand(_ io.Reader, out, err io.Writer) *cobra.Command {
 			kubeadm: easily bootstrap a secure Kubernetes cluster.
 
 			    ┌──────────────────────────────────────────────────────────┐
-			    │ KUBEADM IS BETA, DO NOT USE IT FOR PRODUCTION CLUSTERS!  │
+			    │ KUBEADM IS CURRENTLY IN BETA                             │
 			    │                                                          │
-			    │ But, please try it out! Give us feedback at:             │
+			    │ But please, try it out and give us feedback at:          │
 			    │ https://github.com/kubernetes/kubeadm/issues             │
-			    │ and at-mention @kubernetes/sig-cluster-lifecycle-misc    │
+			    │ and at-mention @kubernetes/sig-cluster-lifecycle-bugs    │
+			    │ or @kubernetes/sig-cluster-lifecycle-feature-requests    │
 			    └──────────────────────────────────────────────────────────┘
 
 			Example usage:
 
 			    Create a two-machine cluster with one master (which controls the cluster),
-			    and one node (where your workloads, like Pods and ReplicaSets run).
+			    and one node (where your workloads, like Pods and Deployments run).
 
 			    ┌──────────────────────────────────────────────────────────┐
-			    │ On the first machine                                     │
+			    │ On the first machine:                                    │
 			    ├──────────────────────────────────────────────────────────┤
 			    │ master# kubeadm init                                     │
 			    └──────────────────────────────────────────────────────────┘
 
 			    ┌──────────────────────────────────────────────────────────┐
-			    │ On the second machine                                    │
+			    │ On the second machine:                                   │
 			    ├──────────────────────────────────────────────────────────┤
-			    │ node# kubeadm join --token=<token> <ip-of-master>:<port> │
+			    │ node# kubeadm join <arguments-returned-from-init>        │
 			    └──────────────────────────────────────────────────────────┘
 
 			    You can then repeat the second step on as many other machines as you like.
@@ -65,13 +68,12 @@ func NewKubeadmCommand(_ io.Reader, out, err io.Writer) *cobra.Command {
 	}
 
 	cmds.ResetFlags()
-	cmds.SetGlobalNormalizationFunc(flag.WarnWordSepNormalizeFunc)
 
 	cmds.AddCommand(NewCmdCompletion(out, ""))
 	cmds.AddCommand(NewCmdConfig(out))
 	cmds.AddCommand(NewCmdInit(out))
 	cmds.AddCommand(NewCmdJoin(out))
-	cmds.AddCommand(NewCmdReset(out))
+	cmds.AddCommand(NewCmdReset(in, out))
 	cmds.AddCommand(NewCmdVersion(out))
 	cmds.AddCommand(NewCmdToken(out, err))
 	cmds.AddCommand(upgrade.NewCmdUpgrade(out))

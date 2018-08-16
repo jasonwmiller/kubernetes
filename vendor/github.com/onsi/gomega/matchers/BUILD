@@ -42,6 +42,8 @@ go_library(
         "type_support.go",
         "with_transform.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/onsi/gomega/matchers",
+    importpath = "github.com/onsi/gomega/matchers",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/onsi/gomega/format:go_default_library",

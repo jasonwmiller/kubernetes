@@ -17,21 +17,23 @@ limitations under the License.
 package proxy
 
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 
+	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
-	extensions "k8s.io/api/extensions/v1beta1"
-	rbac "k8s.io/api/rbac/v1beta1"
+	rbac "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	clientset "k8s.io/client-go/kubernetes"
+	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
-	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
+	"k8s.io/kubernetes/cmd/kubeadm/app/componentconfigs"
+	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
+	"k8s.io/kubernetes/cmd/kubeadm/app/images"
 	kubeadmutil "k8s.io/kubernetes/cmd/kubeadm/app/util"
 	"k8s.io/kubernetes/cmd/kubeadm/app/util/apiclient"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/plugin/pkg/scheduler/algorithm"
 )
 
 const (
@@ -44,37 +46,42 @@ const (
 )
 
 // EnsureProxyAddon creates the kube-proxy addons
-func EnsureProxyAddon(cfg *kubeadmapi.MasterConfiguration, client clientset.Interface) error {
+func EnsureProxyAddon(cfg *kubeadmapi.InitConfiguration, client clientset.Interface) error {
 	if err := CreateServiceAccount(client); err != nil {
 		return fmt.Errorf("error when creating kube-proxy service account: %v", err)
 	}
 
 	// Generate Master Enpoint kubeconfig file
-	masterEndpoint, err := kubeadmutil.GetMasterEndpoint(cfg)
+	masterEndpoint, err := kubeadmutil.GetMasterEndpoint(&cfg.API)
 	if err != nil {
 		return err
 	}
 
-	proxyConfigMapBytes, err := kubeadmutil.ParseTemplate(KubeProxyConfigMap, struct{ MasterEndpoint string }{
-		// Fetch this value from the kubeconfig file
-		MasterEndpoint: masterEndpoint})
+	proxyBytes, err := componentconfigs.Known[componentconfigs.KubeProxyConfigurationKind].Marshal(cfg.ComponentConfigs.KubeProxy)
+	if err != nil {
+		return fmt.Errorf("error when marshaling: %v", err)
+	}
+	var prefixBytes bytes.Buffer
+	apiclient.PrintBytesWithLinePrefix(&prefixBytes, proxyBytes, "    ")
+	var proxyConfigMapBytes, proxyDaemonSetBytes []byte
+	proxyConfigMapBytes, err = kubeadmutil.ParseTemplate(KubeProxyConfigMap19,
+		struct {
+			MasterEndpoint string
+			ProxyConfig    string
+		}{
+			MasterEndpoint: masterEndpoint,
+			ProxyConfig:    prefixBytes.String(),
+		})
 	if err != nil {
 		return fmt.Errorf("error when parsing kube-proxy configmap template: %v", err)
 	}
-
-	proxyDaemonSetBytes, err := kubeadmutil.ParseTemplate(KubeProxyDaemonSet, struct{ ImageRepository, Arch, Version, ImageOverride, ClusterCIDR, MasterTaintKey, CloudTaintKey string }{
-		ImageRepository: cfg.GetControlPlaneImageRepository(),
-		Arch:            runtime.GOARCH,
-		Version:         kubeadmutil.KubernetesVersionToImageTag(cfg.KubernetesVersion),
-		ImageOverride:   cfg.UnifiedControlPlaneImage,
-		ClusterCIDR:     getClusterCIDR(cfg.Networking.PodSubnet),
-		MasterTaintKey:  kubeadmconstants.LabelNodeRoleMaster,
-		CloudTaintKey:   algorithm.TaintExternalCloudProvider,
+	proxyDaemonSetBytes, err = kubeadmutil.ParseTemplate(KubeProxyDaemonSet19, struct{ Image, Arch string }{
+		Image: images.GetKubeControlPlaneImage(constants.KubeProxy, cfg),
+		Arch:  runtime.GOARCH,
 	})
 	if err != nil {
 		return fmt.Errorf("error when parsing kube-proxy daemonset template: %v", err)
 	}
-
 	if err := createKubeProxyAddon(proxyConfigMapBytes, proxyDaemonSetBytes, client); err != nil {
 		return err
 	}
@@ -99,15 +106,12 @@ func CreateServiceAccount(client clientset.Interface) error {
 
 // CreateRBACRules creates the essential RBAC rules for a minimally set-up cluster
 func CreateRBACRules(client clientset.Interface) error {
-	if err := createClusterRoleBindings(client); err != nil {
-		return err
-	}
-	return nil
+	return createClusterRoleBindings(client)
 }
 
 func createKubeProxyAddon(configMapBytes, daemonSetbytes []byte, client clientset.Interface) error {
 	kubeproxyConfigMap := &v1.ConfigMap{}
-	if err := kuberuntime.DecodeInto(api.Codecs.UniversalDecoder(), configMapBytes, kubeproxyConfigMap); err != nil {
+	if err := kuberuntime.DecodeInto(clientsetscheme.Codecs.UniversalDecoder(), configMapBytes, kubeproxyConfigMap); err != nil {
 		return fmt.Errorf("unable to decode kube-proxy configmap %v", err)
 	}
 
@@ -116,16 +120,13 @@ func createKubeProxyAddon(configMapBytes, daemonSetbytes []byte, client clientse
 		return err
 	}
 
-	kubeproxyDaemonSet := &extensions.DaemonSet{}
-	if err := kuberuntime.DecodeInto(api.Codecs.UniversalDecoder(), daemonSetbytes, kubeproxyDaemonSet); err != nil {
+	kubeproxyDaemonSet := &apps.DaemonSet{}
+	if err := kuberuntime.DecodeInto(clientsetscheme.Codecs.UniversalDecoder(), daemonSetbytes, kubeproxyDaemonSet); err != nil {
 		return fmt.Errorf("unable to decode kube-proxy daemonset %v", err)
 	}
 
 	// Create the DaemonSet for kube-proxy or update it in case it already exists
-	if err := apiclient.CreateOrUpdateDaemonSet(client, kubeproxyDaemonSet); err != nil {
-		return err
-	}
-	return nil
+	return apiclient.CreateOrUpdateDaemonSet(client, kubeproxyDaemonSet)
 }
 
 func createClusterRoleBindings(client clientset.Interface) error {
@@ -146,11 +147,4 @@ func createClusterRoleBindings(client clientset.Interface) error {
 			},
 		},
 	})
-}
-
-func getClusterCIDR(podsubnet string) string {
-	if len(podsubnet) == 0 {
-		return ""
-	}
-	return "- --cluster-cidr=" + podsubnet
 }

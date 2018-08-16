@@ -15,20 +15,22 @@ go_library(
         "types.go",
         "zz_generated.deepcopy.go",
     ],
+    importpath = "k8s.io/kubernetes/pkg/apis/componentconfig",
     deps = [
-        "//vendor/k8s.io/api/core/v1:go_default_library",
-        "//vendor/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
-        "//vendor/k8s.io/apimachinery/pkg/conversion:go_default_library",
-        "//vendor/k8s.io/apimachinery/pkg/runtime:go_default_library",
-        "//vendor/k8s.io/apimachinery/pkg/runtime/schema:go_default_library",
-        "//vendor/k8s.io/apimachinery/pkg/util/net:go_default_library",
+        "//staging/src/k8s.io/api/core/v1:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/apis/config:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/runtime:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/runtime/schema:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/net:go_default_library",
+        "//staging/src/k8s.io/apiserver/pkg/apis/config:go_default_library",
     ],
 )
 
 go_test(
     name = "go_default_test",
     srcs = ["helpers_test.go"],
-    library = ":go_default_library",
+    embed = [":go_default_library"],
     deps = ["//vendor/github.com/spf13/pflag:go_default_library"],
 )
 
@@ -46,7 +48,6 @@ filegroup(
         "//pkg/apis/componentconfig/fuzzer:all-srcs",
         "//pkg/apis/componentconfig/install:all-srcs",
         "//pkg/apis/componentconfig/v1alpha1:all-srcs",
-        "//pkg/apis/componentconfig/validation:all-srcs",
     ],
     tags = ["automanaged"],
 )

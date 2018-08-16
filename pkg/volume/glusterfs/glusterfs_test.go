@@ -51,11 +51,23 @@ func TestCanSupport(t *testing.T) {
 	if plug.GetPluginName() != "kubernetes.io/glusterfs" {
 		t.Errorf("Wrong name: %s", plug.GetPluginName())
 	}
-	if plug.CanSupport(&volume.Spec{PersistentVolume: &v1.PersistentVolume{Spec: v1.PersistentVolumeSpec{PersistentVolumeSource: v1.PersistentVolumeSource{}}}}) {
+	if plug.CanSupport(&volume.Spec{}) {
 		t.Errorf("Expected false")
 	}
 	if plug.CanSupport(&volume.Spec{Volume: &v1.Volume{VolumeSource: v1.VolumeSource{}}}) {
 		t.Errorf("Expected false")
+	}
+	if !plug.CanSupport(&volume.Spec{Volume: &v1.Volume{VolumeSource: v1.VolumeSource{Glusterfs: &v1.GlusterfsVolumeSource{}}}}) {
+		t.Errorf("Expected true")
+	}
+	if plug.CanSupport(&volume.Spec{PersistentVolume: &v1.PersistentVolume{Spec: v1.PersistentVolumeSpec{}}}) {
+		t.Errorf("Expected false")
+	}
+	if plug.CanSupport(&volume.Spec{PersistentVolume: &v1.PersistentVolume{Spec: v1.PersistentVolumeSpec{PersistentVolumeSource: v1.PersistentVolumeSource{}}}}) {
+		t.Errorf("Expected false")
+	}
+	if !plug.CanSupport(&volume.Spec{PersistentVolume: &v1.PersistentVolume{Spec: v1.PersistentVolumeSpec{PersistentVolumeSource: v1.PersistentVolumeSource{Glusterfs: &v1.GlusterfsVolumeSource{}}}}}) {
+		t.Errorf("Expected true")
 	}
 }
 
@@ -73,18 +85,9 @@ func TestGetAccessModes(t *testing.T) {
 	if err != nil {
 		t.Errorf("Can't find the plugin by name")
 	}
-	if !contains(plug.GetAccessModes(), v1.ReadWriteOnce) || !contains(plug.GetAccessModes(), v1.ReadOnlyMany) || !contains(plug.GetAccessModes(), v1.ReadWriteMany) {
+	if !volumetest.ContainsAccessMode(plug.GetAccessModes(), v1.ReadWriteOnce) || !volumetest.ContainsAccessMode(plug.GetAccessModes(), v1.ReadOnlyMany) || !volumetest.ContainsAccessMode(plug.GetAccessModes(), v1.ReadWriteMany) {
 		t.Errorf("Expected three AccessModeTypes:  %s, %s, and %s", v1.ReadWriteOnce, v1.ReadOnlyMany, v1.ReadWriteMany)
 	}
-}
-
-func contains(modes []v1.PersistentVolumeAccessMode, mode v1.PersistentVolumeAccessMode) bool {
-	for _, m := range modes {
-		if m == mode {
-			return true
-		}
-	}
-	return false
 }
 
 func doTestPlugin(t *testing.T, spec *volume.Spec) {
@@ -138,7 +141,7 @@ func doTestPlugin(t *testing.T, spec *volume.Spec) {
 	if _, err := os.Stat(volumePath); err == nil {
 		t.Errorf("TearDown() failed, volume path still exists: %s", volumePath)
 	} else if !os.IsNotExist(err) {
-		t.Errorf("SetUp() failed: %v", err)
+		t.Errorf("TearDown() failed: %v", err)
 	}
 }
 
@@ -250,13 +253,14 @@ func TestParseClassParameters(t *testing.T) {
 			nil,   // secret
 			false, // expect error
 			&provisionerConfig{
-				url:         "https://localhost:8080",
-				user:        "admin",
-				userKey:     "password",
-				secretValue: "password",
-				gidMin:      2000,
-				gidMax:      2147483647,
-				volumeType:  gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				url:                "https://localhost:8080",
+				user:               "admin",
+				userKey:            "password",
+				secretValue:        "password",
+				gidMin:             2000,
+				gidMax:             2147483647,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				thinPoolSnapFactor: float32(1.0),
 			},
 		},
 		{
@@ -270,14 +274,15 @@ func TestParseClassParameters(t *testing.T) {
 			&secret,
 			false, // expect error
 			&provisionerConfig{
-				url:             "https://localhost:8080",
-				user:            "admin",
-				secretName:      "mysecret",
-				secretNamespace: "default",
-				secretValue:     "mypassword",
-				gidMin:          2000,
-				gidMax:          2147483647,
-				volumeType:      gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				url:                "https://localhost:8080",
+				user:               "admin",
+				secretName:         "mysecret",
+				secretNamespace:    "default",
+				secretValue:        "mypassword",
+				gidMin:             2000,
+				gidMax:             2147483647,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				thinPoolSnapFactor: float32(1.0),
 			},
 		},
 		{
@@ -289,10 +294,11 @@ func TestParseClassParameters(t *testing.T) {
 			&secret,
 			false, // expect error
 			&provisionerConfig{
-				url:        "https://localhost:8080",
-				gidMin:     2000,
-				gidMax:     2147483647,
-				volumeType: gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				url:                "https://localhost:8080",
+				gidMin:             2000,
+				gidMax:             2147483647,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				thinPoolSnapFactor: float32(1.0),
 			},
 		},
 		{
@@ -426,10 +432,11 @@ func TestParseClassParameters(t *testing.T) {
 			&secret,
 			false, // expect error
 			&provisionerConfig{
-				url:        "https://localhost:8080",
-				gidMin:     4000,
-				gidMax:     2147483647,
-				volumeType: gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				url:                "https://localhost:8080",
+				gidMin:             4000,
+				gidMax:             2147483647,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				thinPoolSnapFactor: float32(1.0),
 			},
 		},
 		{
@@ -442,10 +449,11 @@ func TestParseClassParameters(t *testing.T) {
 			&secret,
 			false, // expect error
 			&provisionerConfig{
-				url:        "https://localhost:8080",
-				gidMin:     2000,
-				gidMax:     5000,
-				volumeType: gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				url:                "https://localhost:8080",
+				gidMin:             2000,
+				gidMax:             5000,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				thinPoolSnapFactor: float32(1.0),
 			},
 		},
 		{
@@ -459,10 +467,11 @@ func TestParseClassParameters(t *testing.T) {
 			&secret,
 			false, // expect error
 			&provisionerConfig{
-				url:        "https://localhost:8080",
-				gidMin:     4000,
-				gidMax:     5000,
-				volumeType: gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				url:                "https://localhost:8080",
+				gidMin:             4000,
+				gidMax:             5000,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 3}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				thinPoolSnapFactor: float32(1.0),
 			},
 		},
 
@@ -478,10 +487,11 @@ func TestParseClassParameters(t *testing.T) {
 			&secret,
 			false, // expect error
 			&provisionerConfig{
-				url:        "https://localhost:8080",
-				gidMin:     4000,
-				gidMax:     5000,
-				volumeType: gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 4}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				url:                "https://localhost:8080",
+				gidMin:             4000,
+				gidMax:             5000,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "replicate", Replicate: gapi.ReplicaDurability{Replica: 4}, Disperse: gapi.DisperseDurability{Data: 0, Redundancy: 0}},
+				thinPoolSnapFactor: float32(1.0),
 			},
 		},
 
@@ -497,10 +507,54 @@ func TestParseClassParameters(t *testing.T) {
 			&secret,
 			false, // expect error
 			&provisionerConfig{
-				url:        "https://localhost:8080",
-				gidMin:     4000,
-				gidMax:     5000,
-				volumeType: gapi.VolumeDurabilityInfo{Type: "disperse", Replicate: gapi.ReplicaDurability{Replica: 0}, Disperse: gapi.DisperseDurability{Data: 4, Redundancy: 2}},
+				url:                "https://localhost:8080",
+				gidMin:             4000,
+				gidMax:             5000,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "disperse", Replicate: gapi.ReplicaDurability{Replica: 0}, Disperse: gapi.DisperseDurability{Data: 4, Redundancy: 2}},
+				thinPoolSnapFactor: float32(1.0),
+			},
+		},
+		{
+			"valid snapfactor: 50",
+			map[string]string{
+				"resturl":         "https://localhost:8080",
+				"restauthenabled": "false",
+				"gidMin":          "4000",
+				"gidMax":          "5000",
+				"volumetype":      "disperse:4:2",
+				"snapfactor":      "50",
+			},
+			&secret,
+			false, // expect error
+			&provisionerConfig{
+				url:                "https://localhost:8080",
+				gidMin:             4000,
+				gidMax:             5000,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "disperse", Replicate: gapi.ReplicaDurability{Replica: 0}, Disperse: gapi.DisperseDurability{Data: 4, Redundancy: 2}},
+				thinPoolSnapFactor: float32(50),
+			},
+		},
+
+		{
+			"valid volumenameprefix: dept-dev",
+			map[string]string{
+				"resturl":          "https://localhost:8080",
+				"restauthenabled":  "false",
+				"gidMin":           "4000",
+				"gidMax":           "5000",
+				"volumetype":       "disperse:4:2",
+				"snapfactor":       "50",
+				"volumenameprefix": "dept-dev",
+			},
+			&secret,
+			false, // expect error
+			&provisionerConfig{
+				url:                "https://localhost:8080",
+				gidMin:             4000,
+				gidMax:             5000,
+				volumeType:         gapi.VolumeDurabilityInfo{Type: "disperse", Replicate: gapi.ReplicaDurability{Replica: 0}, Disperse: gapi.DisperseDurability{Data: 4, Redundancy: 2}},
+				thinPoolSnapFactor: float32(50),
+				volumeNamePrefix:   "dept-dev",
 			},
 		},
 		{
@@ -542,6 +596,50 @@ func TestParseClassParameters(t *testing.T) {
 				"resturl":         "https://localhost:8080",
 				"restauthenabled": "false",
 				"volumetype":      "replicate:-1000",
+			},
+			&secret,
+			true, // expect error
+			nil,
+		},
+		{
+			"invalid thinPoolSnapFactor: value out of range",
+			map[string]string{
+				"resturl":         "https://localhost:8080",
+				"restauthenabled": "false",
+				"snapfactor":      "0.5",
+			},
+			&secret,
+			true, // expect error
+			nil,
+		},
+		{
+			"invalid volumenameprefix: string starting with '_'",
+			map[string]string{
+				"resturl":          "https://localhost:8080",
+				"restauthenabled":  "false",
+				"volumenameprefix": "_",
+			},
+			&secret,
+			true, // expect error
+			nil,
+		},
+		{
+			"invalid volumenameprefix: string with '_'",
+			map[string]string{
+				"resturl":          "https://localhost:8080",
+				"restauthenabled":  "false",
+				"volumenameprefix": "qe_dept",
+			},
+			&secret,
+			true, // expect error
+			nil,
+		},
+		{
+			"invalid thinPoolSnapFactor: value out of range",
+			map[string]string{
+				"resturl":         "https://localhost:8080",
+				"restauthenabled": "false",
+				"snapfactor":      "120",
 			},
 			&secret,
 			true, // expect error

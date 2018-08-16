@@ -30,16 +30,18 @@ import (
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2beta1"
 	"k8s.io/api/core/v1"
-	extensions "k8s.io/api/extensions/v1beta1"
+	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
-	clientfake "k8s.io/client-go/kubernetes/fake"
 	restclient "k8s.io/client-go/rest"
+	scalefake "k8s.io/client-go/scale/fake"
 	core "k8s.io/client-go/testing"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/controller/podautoscaler/metrics"
 
@@ -49,6 +51,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	_ "k8s.io/kubernetes/pkg/apis/autoscaling/install"
+	_ "k8s.io/kubernetes/pkg/apis/core/install"
 	_ "k8s.io/kubernetes/pkg/apis/extensions/install"
 )
 
@@ -86,7 +89,7 @@ type legacyTestCase struct {
 	statusUpdated        bool
 	eventCreated         bool
 	verifyEvents         bool
-	useMetricsApi        bool
+	useMetricsAPI        bool
 	metricsTarget        []autoscalingv2.MetricSpec
 	// Channel with names of HPA objects which we have reconciled.
 	processed chan string
@@ -114,12 +117,12 @@ func (tc *legacyTestCase) computeCPUCurrent() {
 	tc.CPUCurrent = int32(100 * reported / requested)
 }
 
-func (tc *legacyTestCase) prepareTestClient(t *testing.T) *fake.Clientset {
+func (tc *legacyTestCase) prepareTestClient(t *testing.T) (*fake.Clientset, *scalefake.FakeScaleClient) {
 	namespace := "test-namespace"
 	hpaName := "test-hpa"
 	podNamePrefix := "test-pod"
-	// TODO: also test with TargetSelector
-	selector := map[string]string{"name": podNamePrefix}
+	labelSet := map[string]string{"name": podNamePrefix}
+	selector := labels.SelectorFromSet(labelSet).String()
 
 	tc.Lock()
 
@@ -131,13 +134,11 @@ func (tc *legacyTestCase) prepareTestClient(t *testing.T) *fake.Clientset {
 		tc.computeCPUCurrent()
 	}
 
-	// TODO(madhusudancs): HPA only supports resources in extensions/v1beta1 right now. Add
-	// tests for "v1" replicationcontrollers when HPA adds support for cross-group scale.
 	if tc.resource == nil {
 		tc.resource = &fakeResource{
 			name:       "test-rc",
-			apiVersion: "extensions/v1beta1",
-			kind:       "replicationcontrollers",
+			apiVersion: "v1",
+			kind:       "ReplicationController",
 		}
 	}
 	tc.Unlock()
@@ -200,72 +201,12 @@ func (tc *legacyTestCase) prepareTestClient(t *testing.T) *fake.Clientset {
 		}
 
 		// and... convert to autoscaling v1 to return the right type
-		objv1, err := UnsafeConvertToVersionVia(obj, autoscalingv1.SchemeGroupVersion)
+		objv1, err := unsafeConvertToVersionVia(obj, autoscalingv1.SchemeGroupVersion)
 		if err != nil {
 			return true, nil, err
 		}
 
 		return true, objv1, nil
-	})
-
-	fakeClient.AddReactor("get", "replicationcontrollers", func(action core.Action) (handled bool, ret runtime.Object, err error) {
-		tc.Lock()
-		defer tc.Unlock()
-
-		obj := &extensions.Scale{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      tc.resource.name,
-				Namespace: namespace,
-			},
-			Spec: extensions.ScaleSpec{
-				Replicas: tc.initialReplicas,
-			},
-			Status: extensions.ScaleStatus{
-				Replicas: tc.initialReplicas,
-				Selector: selector,
-			},
-		}
-		return true, obj, nil
-	})
-
-	fakeClient.AddReactor("get", "deployments", func(action core.Action) (handled bool, ret runtime.Object, err error) {
-		tc.Lock()
-		defer tc.Unlock()
-
-		obj := &extensions.Scale{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      tc.resource.name,
-				Namespace: namespace,
-			},
-			Spec: extensions.ScaleSpec{
-				Replicas: tc.initialReplicas,
-			},
-			Status: extensions.ScaleStatus{
-				Replicas: tc.initialReplicas,
-				Selector: selector,
-			},
-		}
-		return true, obj, nil
-	})
-
-	fakeClient.AddReactor("get", "replicasets", func(action core.Action) (handled bool, ret runtime.Object, err error) {
-		tc.Lock()
-		defer tc.Unlock()
-
-		obj := &extensions.Scale{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      tc.resource.name,
-				Namespace: namespace,
-			},
-			Spec: extensions.ScaleSpec{
-				Replicas: tc.initialReplicas,
-			},
-			Status: extensions.ScaleStatus{
-				Replicas: tc.initialReplicas,
-				Selector: selector,
-			},
-		}
-		return true, obj, nil
 	})
 
 	fakeClient.AddReactor("list", "pods", func(action core.Action) (handled bool, ret runtime.Object, err error) {
@@ -319,7 +260,7 @@ func (tc *legacyTestCase) prepareTestClient(t *testing.T) *fake.Clientset {
 
 		var heapsterRawMemResponse []byte
 
-		if tc.useMetricsApi {
+		if tc.useMetricsAPI {
 			metrics := metricsapi.PodMetricsList{}
 			for i, cpu := range tc.reportedLevels {
 				podMetric := metricsapi.PodMetrics{
@@ -386,39 +327,6 @@ func (tc *legacyTestCase) prepareTestClient(t *testing.T) *fake.Clientset {
 		return true, newFakeResponseWrapper(heapsterRawMemResponse), nil
 	})
 
-	fakeClient.AddReactor("update", "replicationcontrollers", func(action core.Action) (handled bool, ret runtime.Object, err error) {
-		tc.Lock()
-		defer tc.Unlock()
-
-		obj := action.(core.UpdateAction).GetObject().(*extensions.Scale)
-		replicas := action.(core.UpdateAction).GetObject().(*extensions.Scale).Spec.Replicas
-		assert.Equal(t, tc.desiredReplicas, replicas, "the replica count of the RC should be as expected")
-		tc.scaleUpdated = true
-		return true, obj, nil
-	})
-
-	fakeClient.AddReactor("update", "deployments", func(action core.Action) (handled bool, ret runtime.Object, err error) {
-		tc.Lock()
-		defer tc.Unlock()
-
-		obj := action.(core.UpdateAction).GetObject().(*extensions.Scale)
-		replicas := action.(core.UpdateAction).GetObject().(*extensions.Scale).Spec.Replicas
-		assert.Equal(t, tc.desiredReplicas, replicas, "the replica count of the deployment should be as expected")
-		tc.scaleUpdated = true
-		return true, obj, nil
-	})
-
-	fakeClient.AddReactor("update", "replicasets", func(action core.Action) (handled bool, ret runtime.Object, err error) {
-		tc.Lock()
-		defer tc.Unlock()
-
-		obj := action.(core.UpdateAction).GetObject().(*extensions.Scale)
-		replicas := action.(core.UpdateAction).GetObject().(*extensions.Scale).Spec.Replicas
-		assert.Equal(t, tc.desiredReplicas, replicas, "the replica count of the replicaset should be as expected")
-		tc.scaleUpdated = true
-		return true, obj, nil
-	})
-
 	fakeClient.AddReactor("update", "horizontalpodautoscalers", func(action core.Action) (handled bool, ret runtime.Object, err error) {
 		tc.Lock()
 		defer tc.Unlock()
@@ -428,8 +336,9 @@ func (tc *legacyTestCase) prepareTestClient(t *testing.T) *fake.Clientset {
 		assert.Equal(t, hpaName, obj.Name, "the HPA name should be as expected")
 		assert.Equal(t, tc.desiredReplicas, obj.Status.DesiredReplicas, "the desired replica count reported in the object status should be as expected")
 		if tc.verifyCPUCurrent {
-			assert.NotNil(t, obj.Status.CurrentCPUUtilizationPercentage, "the reported CPU utilization percentage should be non-nil")
-			assert.Equal(t, tc.CPUCurrent, *obj.Status.CurrentCPUUtilizationPercentage, "the report CPU utilization percentage should be as expected")
+			if assert.NotNil(t, obj.Status.CurrentCPUUtilizationPercentage, "the reported CPU utilization percentage should be non-nil") {
+				assert.Equal(t, tc.CPUCurrent, *obj.Status.CurrentCPUUtilizationPercentage, "the report CPU utilization percentage should be as expected")
+			}
 		}
 		tc.statusUpdated = true
 		// Every time we reconcile HPA object we are updating status.
@@ -437,10 +346,104 @@ func (tc *legacyTestCase) prepareTestClient(t *testing.T) *fake.Clientset {
 		return true, obj, nil
 	})
 
+	fakeScaleClient := &scalefake.FakeScaleClient{}
+	fakeScaleClient.AddReactor("get", "replicationcontrollers", func(action core.Action) (handled bool, ret runtime.Object, err error) {
+		tc.Lock()
+		defer tc.Unlock()
+
+		obj := &autoscalingv1.Scale{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      tc.resource.name,
+				Namespace: namespace,
+			},
+			Spec: autoscalingv1.ScaleSpec{
+				Replicas: tc.initialReplicas,
+			},
+			Status: autoscalingv1.ScaleStatus{
+				Replicas: tc.initialReplicas,
+				Selector: selector,
+			},
+		}
+		return true, obj, nil
+	})
+
+	fakeScaleClient.AddReactor("get", "deployments", func(action core.Action) (handled bool, ret runtime.Object, err error) {
+		tc.Lock()
+		defer tc.Unlock()
+
+		obj := &autoscalingv1.Scale{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      tc.resource.name,
+				Namespace: namespace,
+			},
+			Spec: autoscalingv1.ScaleSpec{
+				Replicas: tc.initialReplicas,
+			},
+			Status: autoscalingv1.ScaleStatus{
+				Replicas: tc.initialReplicas,
+				Selector: selector,
+			},
+		}
+		return true, obj, nil
+	})
+
+	fakeScaleClient.AddReactor("get", "replicasets", func(action core.Action) (handled bool, ret runtime.Object, err error) {
+		tc.Lock()
+		defer tc.Unlock()
+
+		obj := &autoscalingv1.Scale{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      tc.resource.name,
+				Namespace: namespace,
+			},
+			Spec: autoscalingv1.ScaleSpec{
+				Replicas: tc.initialReplicas,
+			},
+			Status: autoscalingv1.ScaleStatus{
+				Replicas: tc.initialReplicas,
+				Selector: selector,
+			},
+		}
+		return true, obj, nil
+	})
+
+	fakeScaleClient.AddReactor("update", "replicationcontrollers", func(action core.Action) (handled bool, ret runtime.Object, err error) {
+		tc.Lock()
+		defer tc.Unlock()
+
+		obj := action.(core.UpdateAction).GetObject().(*autoscalingv1.Scale)
+		replicas := action.(core.UpdateAction).GetObject().(*autoscalingv1.Scale).Spec.Replicas
+		assert.Equal(t, tc.desiredReplicas, replicas, "the replica count of the RC should be as expected")
+		tc.scaleUpdated = true
+		return true, obj, nil
+	})
+
+	fakeScaleClient.AddReactor("update", "deployments", func(action core.Action) (handled bool, ret runtime.Object, err error) {
+		tc.Lock()
+		defer tc.Unlock()
+
+		obj := action.(core.UpdateAction).GetObject().(*autoscalingv1.Scale)
+		replicas := action.(core.UpdateAction).GetObject().(*autoscalingv1.Scale).Spec.Replicas
+		assert.Equal(t, tc.desiredReplicas, replicas, "the replica count of the deployment should be as expected")
+		tc.scaleUpdated = true
+		return true, obj, nil
+	})
+
+	fakeScaleClient.AddReactor("update", "replicasets", func(action core.Action) (handled bool, ret runtime.Object, err error) {
+		tc.Lock()
+		defer tc.Unlock()
+
+		obj := action.(core.UpdateAction).GetObject().(*autoscalingv1.Scale)
+		replicas := action.(core.UpdateAction).GetObject().(*autoscalingv1.Scale).Spec.Replicas
+		assert.Equal(t, tc.desiredReplicas, replicas, "the replica count of the replicaset should be as expected")
+		tc.scaleUpdated = true
+		return true, obj, nil
+	})
+
 	fakeWatch := watch.NewFake()
 	fakeClient.AddWatchReactor("*", core.DefaultWatchReactor(fakeWatch, nil))
 
-	return fakeClient
+	return fakeClient, fakeScaleClient
 }
 
 func (tc *legacyTestCase) verifyResults(t *testing.T) {
@@ -455,10 +458,10 @@ func (tc *legacyTestCase) verifyResults(t *testing.T) {
 }
 
 func (tc *legacyTestCase) runTest(t *testing.T) {
-	testClient := tc.prepareTestClient(t)
+	testClient, testScaleClient := tc.prepareTestClient(t)
 	metricsClient := metrics.NewHeapsterMetricsClient(testClient, metrics.DefaultHeapsterNamespace, metrics.DefaultHeapsterScheme, metrics.DefaultHeapsterService, metrics.DefaultHeapsterPort)
 
-	eventClient := &clientfake.Clientset{}
+	eventClient := &fake.Clientset{}
 	eventClient.AddReactor("*", "events", func(action core.Action) (handled bool, ret runtime.Object, err error) {
 		tc.Lock()
 		defer tc.Unlock()
@@ -484,20 +487,20 @@ func (tc *legacyTestCase) runTest(t *testing.T) {
 	replicaCalc := &ReplicaCalculator{
 		metricsClient: metricsClient,
 		podsGetter:    testClient.Core(),
+		tolerance:     defaultTestingTolerance,
 	}
 
 	informerFactory := informers.NewSharedInformerFactory(testClient, controller.NoResyncPeriodFunc())
-	defaultUpscaleForbiddenWindow := 3 * time.Minute
 	defaultDownscaleForbiddenWindow := 5 * time.Minute
 
 	hpaController := NewHorizontalController(
 		eventClient.Core(),
-		testClient.Extensions(),
+		testScaleClient,
 		testClient.Autoscaling(),
+		testrestmapper.TestOnlyStaticRESTMapper(legacyscheme.Scheme),
 		replicaCalc,
 		informerFactory.Autoscaling().V1().HorizontalPodAutoscalers(),
 		controller.NoResyncPeriodFunc(),
-		defaultUpscaleForbiddenWindow,
 		defaultDownscaleForbiddenWindow,
 	)
 	hpaController.hpaListerSynced = alwaysReady
@@ -520,7 +523,7 @@ func (tc *legacyTestCase) runTest(t *testing.T) {
 	tc.verifyResults(t)
 }
 
-func LegacyTestScaleUp(t *testing.T) {
+func TestLegacyScaleUp(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:         2,
 		maxReplicas:         6,
@@ -530,12 +533,12 @@ func LegacyTestScaleUp(t *testing.T) {
 		verifyCPUCurrent:    true,
 		reportedLevels:      []uint64{300, 500, 700},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
 
-func LegacyTestScaleUpUnreadyLessScale(t *testing.T) {
+func TestLegacyScaleUpUnreadyLessScale(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:          2,
 		maxReplicas:          6,
@@ -547,12 +550,12 @@ func LegacyTestScaleUpUnreadyLessScale(t *testing.T) {
 		reportedLevels:       []uint64{300, 500, 700},
 		reportedCPURequests:  []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
 		reportedPodReadiness: []v1.ConditionStatus{v1.ConditionFalse, v1.ConditionTrue, v1.ConditionTrue},
-		useMetricsApi:        true,
+		useMetricsAPI:        true,
 	}
 	tc.runTest(t)
 }
 
-func LegacyTestScaleUpUnreadyNoScale(t *testing.T) {
+func TestLegacyScaleUpUnreadyNoScale(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:          2,
 		maxReplicas:          6,
@@ -564,12 +567,12 @@ func LegacyTestScaleUpUnreadyNoScale(t *testing.T) {
 		reportedLevels:       []uint64{400, 500, 700},
 		reportedCPURequests:  []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
 		reportedPodReadiness: []v1.ConditionStatus{v1.ConditionTrue, v1.ConditionFalse, v1.ConditionFalse},
-		useMetricsApi:        true,
+		useMetricsAPI:        true,
 	}
 	tc.runTest(t)
 }
 
-func LegacyTestScaleUpDeployment(t *testing.T) {
+func TestLegacyScaleUpDeployment(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:         2,
 		maxReplicas:         6,
@@ -579,17 +582,17 @@ func LegacyTestScaleUpDeployment(t *testing.T) {
 		verifyCPUCurrent:    true,
 		reportedLevels:      []uint64{300, 500, 700},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 		resource: &fakeResource{
 			name:       "test-dep",
 			apiVersion: "extensions/v1beta1",
-			kind:       "deployments",
+			kind:       "Deployment",
 		},
 	}
 	tc.runTest(t)
 }
 
-func LegacyTestScaleUpReplicaSet(t *testing.T) {
+func TestLegacyScaleUpReplicaSet(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:         2,
 		maxReplicas:         6,
@@ -599,17 +602,17 @@ func LegacyTestScaleUpReplicaSet(t *testing.T) {
 		verifyCPUCurrent:    true,
 		reportedLevels:      []uint64{300, 500, 700},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 		resource: &fakeResource{
 			name:       "test-replicaset",
 			apiVersion: "extensions/v1beta1",
-			kind:       "replicasets",
+			kind:       "ReplicaSet",
 		},
 	}
 	tc.runTest(t)
 }
 
-func LegacyTestScaleUpCM(t *testing.T) {
+func TestLegacyScaleUpCM(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:     2,
 		maxReplicas:     6,
@@ -631,7 +634,7 @@ func LegacyTestScaleUpCM(t *testing.T) {
 	tc.runTest(t)
 }
 
-func LegacyTestScaleUpCMUnreadyLessScale(t *testing.T) {
+func TestLegacyScaleUpCMUnreadyLessScale(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:     2,
 		maxReplicas:     6,
@@ -654,7 +657,7 @@ func LegacyTestScaleUpCMUnreadyLessScale(t *testing.T) {
 	tc.runTest(t)
 }
 
-func LegacyTestScaleUpCMUnreadyNoScaleWouldScaleDown(t *testing.T) {
+func TestLegacyScaleUpCMUnreadyNoScaleWouldScaleDown(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:     2,
 		maxReplicas:     6,
@@ -677,7 +680,7 @@ func LegacyTestScaleUpCMUnreadyNoScaleWouldScaleDown(t *testing.T) {
 	tc.runTest(t)
 }
 
-func LegacyTestScaleDown(t *testing.T) {
+func TestLegacyScaleDown(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:         2,
 		maxReplicas:         6,
@@ -687,12 +690,12 @@ func LegacyTestScaleDown(t *testing.T) {
 		verifyCPUCurrent:    true,
 		reportedLevels:      []uint64{100, 300, 500, 250, 250},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
 
-func LegacyTestScaleDownCM(t *testing.T) {
+func TestLegacyScaleDownCM(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:     2,
 		maxReplicas:     6,
@@ -714,7 +717,7 @@ func LegacyTestScaleDownCM(t *testing.T) {
 	tc.runTest(t)
 }
 
-func LegacyTestScaleDownIgnoresUnreadyPods(t *testing.T) {
+func TestLegacyScaleDownIgnoresUnreadyPods(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:          2,
 		maxReplicas:          6,
@@ -725,7 +728,7 @@ func LegacyTestScaleDownIgnoresUnreadyPods(t *testing.T) {
 		verifyCPUCurrent:     true,
 		reportedLevels:       []uint64{100, 300, 500, 250, 250},
 		reportedCPURequests:  []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:        true,
+		useMetricsAPI:        true,
 		reportedPodReadiness: []v1.ConditionStatus{v1.ConditionTrue, v1.ConditionTrue, v1.ConditionTrue, v1.ConditionFalse, v1.ConditionFalse},
 	}
 	tc.runTest(t)
@@ -740,7 +743,7 @@ func LegacyTestTolerance(t *testing.T) {
 		CPUTarget:           100,
 		reportedLevels:      []uint64{1010, 1030, 1020},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("0.9"), resource.MustParse("1.0"), resource.MustParse("1.1")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -775,7 +778,7 @@ func LegacyTestMinReplicas(t *testing.T) {
 		CPUTarget:           90,
 		reportedLevels:      []uint64{10, 95, 10},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("0.9"), resource.MustParse("1.0"), resource.MustParse("1.1")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -789,7 +792,7 @@ func LegacyTestZeroReplicas(t *testing.T) {
 		CPUTarget:           90,
 		reportedLevels:      []uint64{},
 		reportedCPURequests: []resource.Quantity{},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -803,7 +806,7 @@ func LegacyTestTooFewReplicas(t *testing.T) {
 		CPUTarget:           90,
 		reportedLevels:      []uint64{},
 		reportedCPURequests: []resource.Quantity{},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -817,7 +820,7 @@ func LegacyTestTooManyReplicas(t *testing.T) {
 		CPUTarget:           90,
 		reportedLevels:      []uint64{},
 		reportedCPURequests: []resource.Quantity{},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -831,12 +834,12 @@ func LegacyTestMaxReplicas(t *testing.T) {
 		CPUTarget:           90,
 		reportedLevels:      []uint64{8000, 9500, 1000},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("0.9"), resource.MustParse("1.0"), resource.MustParse("1.1")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
 
-func LegacyTestSuperfluousMetrics(t *testing.T) {
+func TestLegacySuperfluousMetrics(t *testing.T) {
 	tc := legacyTestCase{
 		minReplicas:         2,
 		maxReplicas:         6,
@@ -845,7 +848,7 @@ func LegacyTestSuperfluousMetrics(t *testing.T) {
 		CPUTarget:           100,
 		reportedLevels:      []uint64{4000, 9500, 3000, 7000, 3200, 2000},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -859,7 +862,7 @@ func LegacyTestMissingMetrics(t *testing.T) {
 		CPUTarget:           100,
 		reportedLevels:      []uint64{400, 95},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -873,7 +876,7 @@ func LegacyTestEmptyMetrics(t *testing.T) {
 		CPUTarget:           100,
 		reportedLevels:      []uint64{},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -886,7 +889,7 @@ func LegacyTestEmptyCPURequest(t *testing.T) {
 		desiredReplicas: 1,
 		CPUTarget:       100,
 		reportedLevels:  []uint64{200},
-		useMetricsApi:   true,
+		useMetricsAPI:   true,
 	}
 	tc.runTest(t)
 }
@@ -901,7 +904,7 @@ func LegacyTestEventCreated(t *testing.T) {
 		reportedLevels:      []uint64{200},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("0.2")},
 		verifyEvents:        true,
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -916,7 +919,7 @@ func LegacyTestEventNotCreated(t *testing.T) {
 		reportedLevels:      []uint64{200, 200},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("0.4"), resource.MustParse("0.4")},
 		verifyEvents:        true,
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -930,7 +933,7 @@ func LegacyTestMissingReports(t *testing.T) {
 		CPUTarget:           50,
 		reportedLevels:      []uint64{200},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("0.2")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -944,7 +947,7 @@ func LegacyTestUpscaleCap(t *testing.T) {
 		CPUTarget:           10,
 		reportedLevels:      []uint64{100, 200, 300},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("0.1"), resource.MustParse("0.1"), resource.MustParse("0.1")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 	}
 	tc.runTest(t)
 }
@@ -965,8 +968,8 @@ func LegacyTestComputedToleranceAlgImplementation(t *testing.T) {
 	perPodRequested := totalRequestedCPUOfAllPods / startPods
 
 	// Force a minimal scaling event by satisfying  (tolerance < 1 - resourcesUsedRatio).
-	target := math.Abs(1/(requestedToUsed*(1-tolerance))) + .01
-	finalCpuPercentTarget := int32(target * 100)
+	target := math.Abs(1/(requestedToUsed*(1-defaultTestingTolerance))) + .01
+	finalCPUPercentTarget := int32(target * 100)
 	resourcesUsedRatio := float64(totalUsedCPUOfAllPods) / float64(float64(totalRequestedCPUOfAllPods)*target)
 
 	// i.e. .60 * 20 -> scaled down expectation.
@@ -978,7 +981,7 @@ func LegacyTestComputedToleranceAlgImplementation(t *testing.T) {
 		maxReplicas:     1000,
 		initialReplicas: startPods,
 		desiredReplicas: finalPods,
-		CPUTarget:       finalCpuPercentTarget,
+		CPUTarget:       finalCPUPercentTarget,
 		reportedLevels: []uint64{
 			totalUsedCPUOfAllPods / 10,
 			totalUsedCPUOfAllPods / 10,
@@ -1003,22 +1006,22 @@ func LegacyTestComputedToleranceAlgImplementation(t *testing.T) {
 			resource.MustParse(fmt.Sprint(perPodRequested) + "m"),
 			resource.MustParse(fmt.Sprint(perPodRequested) + "m"),
 		},
-		useMetricsApi: true,
+		useMetricsAPI: true,
 	}
 
 	tc.runTest(t)
 
 	// Reuse the data structure above, now testing "unscaling".
 	// Now, we test that no scaling happens if we are in a very close margin to the tolerance
-	target = math.Abs(1/(requestedToUsed*(1-tolerance))) + .004
-	finalCpuPercentTarget = int32(target * 100)
-	tc.CPUTarget = finalCpuPercentTarget
+	target = math.Abs(1/(requestedToUsed*(1-defaultTestingTolerance))) + .004
+	finalCPUPercentTarget = int32(target * 100)
+	tc.CPUTarget = finalCPUPercentTarget
 	tc.initialReplicas = startPods
 	tc.desiredReplicas = startPods
 	tc.runTest(t)
 }
 
-func LegacyTestScaleUpRCImmediately(t *testing.T) {
+func TestLegacyScaleUpRCImmediately(t *testing.T) {
 	time := metav1.Time{Time: time.Now()}
 	tc := legacyTestCase{
 		minReplicas:         2,
@@ -1028,13 +1031,13 @@ func LegacyTestScaleUpRCImmediately(t *testing.T) {
 		verifyCPUCurrent:    false,
 		reportedLevels:      []uint64{0, 0, 0, 0},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 		lastScaleTime:       &time,
 	}
 	tc.runTest(t)
 }
 
-func LegacyTestScaleDownRCImmediately(t *testing.T) {
+func TestLegacyScaleDownRCImmediately(t *testing.T) {
 	time := metav1.Time{Time: time.Now()}
 	tc := legacyTestCase{
 		minReplicas:         2,
@@ -1044,7 +1047,7 @@ func LegacyTestScaleDownRCImmediately(t *testing.T) {
 		CPUTarget:           50,
 		reportedLevels:      []uint64{8000, 9500, 1000},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("0.9"), resource.MustParse("1.0"), resource.MustParse("1.1")},
-		useMetricsApi:       true,
+		useMetricsAPI:       true,
 		lastScaleTime:       &time,
 	}
 	tc.runTest(t)

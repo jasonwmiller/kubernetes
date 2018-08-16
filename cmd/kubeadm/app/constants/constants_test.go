@@ -17,6 +17,9 @@ limitations under the License.
 package constants
 
 import (
+	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"k8s.io/kubernetes/pkg/util/version"
@@ -36,12 +39,38 @@ func TestGetStaticPodDirectory(t *testing.T) {
 }
 
 func TestGetAdminKubeConfigPath(t *testing.T) {
-	expected := "/etc/kubernetes/admin.conf"
+	expected := filepath.Join(KubernetesDir, AdminKubeConfigFileName)
 	actual := GetAdminKubeConfigPath()
 
 	if actual != expected {
 		t.Errorf(
 			"failed GetAdminKubeConfigPath:\n\texpected: %s\n\t  actual: %s",
+			expected,
+			actual,
+		)
+	}
+}
+
+func TestGetBootstrapKubeletKubeConfigPath(t *testing.T) {
+	expected := "/etc/kubernetes/bootstrap-kubelet.conf"
+	actual := GetBootstrapKubeletKubeConfigPath()
+
+	if actual != expected {
+		t.Errorf(
+			"failed GetBootstrapKubeletKubeConfigPath:\n\texpected: %s\n\t  actual: %s",
+			expected,
+			actual,
+		)
+	}
+}
+
+func TestGetKubeletKubeConfigPath(t *testing.T) {
+	expected := "/etc/kubernetes/kubelet.conf"
+	actual := GetKubeletKubeConfigPath()
+
+	if actual != expected {
+		t.Errorf(
+			"failed GetKubeletKubeConfigPath:\n\texpected: %s\n\t  actual: %s",
 			expected,
 			actual,
 		)
@@ -113,46 +142,85 @@ func TestAddSelfHostedPrefix(t *testing.T) {
 	}
 }
 
-func TestGetNodeBootstrapTokenAuthGroup(t *testing.T) {
+func TestEtcdSupportedVersion(t *testing.T) {
 	var tests = []struct {
-		k8sVersion, expected string
+		kubernetesVersion string
+		expectedVersion   *version.Version
+		expectedError     error
 	}{
 		{
-			k8sVersion: "v1.7.0",
-			expected:   "system:bootstrappers",
+			kubernetesVersion: "1.99.0",
+			expectedVersion:   nil,
+			expectedError:     fmt.Errorf("Unsupported or unknown kubernetes version(1.99.0)"),
 		},
 		{
-			k8sVersion: "v1.7.8",
-			expected:   "system:bootstrappers",
+			kubernetesVersion: "1.10.0",
+			expectedVersion:   version.MustParseSemantic("3.1.12"),
+			expectedError:     nil,
 		},
 		{
-			k8sVersion: "v1.8.0-alpha.3",
-			expected:   "system:bootstrappers",
+			kubernetesVersion: "1.10.2",
+			expectedVersion:   version.MustParseSemantic("3.1.12"),
+			expectedError:     nil,
 		},
 		{
-			k8sVersion: "v1.8.0-beta.0",
-			expected:   "system:bootstrappers:kubeadm:default-node-token",
+			kubernetesVersion: "1.11.0",
+			expectedVersion:   version.MustParseSemantic("3.2.18"),
+			expectedError:     nil,
 		},
 		{
-			k8sVersion: "v1.8.0-rc.1",
-			expected:   "system:bootstrappers:kubeadm:default-node-token",
-		},
-		{
-			k8sVersion: "v1.8.0",
-			expected:   "system:bootstrappers:kubeadm:default-node-token",
-		},
-		{
-			k8sVersion: "v1.8.9",
-			expected:   "system:bootstrappers:kubeadm:default-node-token",
+			kubernetesVersion: "1.12.1",
+			expectedVersion:   version.MustParseSemantic("3.2.18"),
+			expectedError:     nil,
 		},
 	}
 	for _, rt := range tests {
-		actual := GetNodeBootstrapTokenAuthGroup(version.MustParseSemantic(rt.k8sVersion))
-		if actual != rt.expected {
+		actualVersion, actualError := EtcdSupportedVersion(rt.kubernetesVersion)
+		if actualError != nil {
+			if rt.expectedError == nil {
+				t.Errorf("failed EtcdSupportedVersion:\n\texpected no error, but got: %v", actualError)
+			} else if actualError.Error() != rt.expectedError.Error() {
+				t.Errorf(
+					"failed EtcdSupportedVersion:\n\texpected error: %v\n\t  actual error: %v",
+					rt.expectedError,
+					actualError,
+				)
+			}
+		} else {
+			if rt.expectedError != nil {
+				t.Errorf("failed EtcdSupportedVersion:\n\texpected error: %v, but got no error", rt.expectedError)
+			} else if strings.Compare(actualVersion.String(), rt.expectedVersion.String()) != 0 {
+				t.Errorf(
+					"failed EtcdSupportedVersion:\n\texpected version: %s\n\t  actual version: %s",
+					rt.expectedVersion.String(),
+					actualVersion.String(),
+				)
+			}
+		}
+	}
+}
+
+func TestGetKubeDNSVersion(t *testing.T) {
+	var tests = []struct {
+		dns      string
+		expected string
+	}{
+		{
+			dns:      KubeDNS,
+			expected: KubeDNSVersion,
+		},
+		{
+			dns:      CoreDNS,
+			expected: CoreDNSVersion,
+		},
+	}
+	for _, rt := range tests {
+		actualDNSVersion := GetDNSVersion(rt.dns)
+		if actualDNSVersion != rt.expected {
 			t.Errorf(
-				"failed GetNodeBootstrapTokenAuthGroup:\n\texpected: %s\n\t  actual: %s",
+				"failed GetDNSVersion:\n\texpected: %s\n\t  actual: %s",
 				rt.expected,
-				actual,
+				actualDNSVersion,
 			)
 		}
 	}

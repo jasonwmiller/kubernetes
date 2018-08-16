@@ -14,11 +14,11 @@
 
 all: build
 
-REGISTRY ?= gcr.io/google-containers
+REGISTRY ?= staging-k8s.gcr.io
 IMAGE ?= debian-base
 BUILD_IMAGE ?= debian-build
 
-TAG ?= 0.2
+TAG ?= 0.3.2
 
 TAR_FILE ?= rootfs.tar
 ARCH?=amd64
@@ -26,22 +26,22 @@ TEMP_DIR:=$(shell mktemp -d)
 QEMUVERSION=v2.9.1
 
 ifeq ($(ARCH),amd64)
-	BASEIMAGE?=debian:jessie
+	BASEIMAGE?=debian:stretch
 endif
 ifeq ($(ARCH),arm)
-	BASEIMAGE?=arm32v7/debian:jessie
+	BASEIMAGE?=arm32v7/debian:stretch
 	QEMUARCH=arm
 endif
 ifeq ($(ARCH),arm64)
-	BASEIMAGE?=arm64v8/debian:jessie
+	BASEIMAGE?=arm64v8/debian:stretch
 	QEMUARCH=aarch64
 endif
 ifeq ($(ARCH),ppc64le)
-	BASEIMAGE?=ppc64le/debian:jessie
+	BASEIMAGE?=ppc64le/debian:stretch
 	QEMUARCH=ppc64le
 endif
 ifeq ($(ARCH),s390x)
-	BASEIMAGE?=s390x/debian:jessie
+	BASEIMAGE?=s390x/debian:stretch
 	QEMUARCH=s390x
 endif
 
@@ -57,9 +57,11 @@ ifeq ($(ARCH),amd64)
 	sed "/CROSS_BUILD_/d" $(TEMP_DIR)/Dockerfile.build > $(TEMP_DIR)/Dockerfile.build.tmp
 else
 	# When cross-building, only the placeholder "CROSS_BUILD_" should be removed
-	# Register /usr/bin/qemu-ARCH-static as the handler for ARM binaries in the kernel
+	# Register /usr/bin/qemu-ARCH-static as the handler for non-x86 binaries in the kernel
 	docker run --rm --privileged multiarch/qemu-user-static:register --reset
 	curl -sSL https://github.com/multiarch/qemu-user-static/releases/download/$(QEMUVERSION)/x86_64_qemu-$(QEMUARCH)-static.tar.gz | tar -xz -C $(TEMP_DIR)
+	# Ensure we don't get surprised by umask settings
+	chmod 0755 $(TEMP_DIR)/qemu-$(QEMUARCH)-static
 	sed "s/CROSS_BUILD_//g" $(TEMP_DIR)/Dockerfile.build > $(TEMP_DIR)/Dockerfile.build.tmp
 endif
 	mv $(TEMP_DIR)/Dockerfile.build.tmp $(TEMP_DIR)/Dockerfile.build
@@ -71,7 +73,7 @@ endif
 	rm -rf $(TEMP_DIR)
 
 push: build
-	gcloud docker -- push $(REGISTRY)/$(IMAGE)-$(ARCH):$(TAG)
+	docker push $(REGISTRY)/$(IMAGE)-$(ARCH):$(TAG)
 
 clean:
 	docker rmi -f $(REGISTRY)/$(IMAGE)-$(ARCH):$(TAG) || true

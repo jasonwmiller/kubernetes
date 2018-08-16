@@ -6,6 +6,8 @@ go_library(
         "container.go",
         "factory.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/google/cadvisor/container",
+    importpath = "github.com/google/cadvisor/container",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/golang/glog:go_default_library",
@@ -26,6 +28,7 @@ filegroup(
     srcs = [
         ":package-srcs",
         "//vendor/github.com/google/cadvisor/container/common:all-srcs",
+        "//vendor/github.com/google/cadvisor/container/containerd:all-srcs",
         "//vendor/github.com/google/cadvisor/container/crio:all-srcs",
         "//vendor/github.com/google/cadvisor/container/docker:all-srcs",
         "//vendor/github.com/google/cadvisor/container/libcontainer:all-srcs",

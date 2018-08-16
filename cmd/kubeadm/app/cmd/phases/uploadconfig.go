@@ -21,29 +21,59 @@ import (
 
 	"github.com/spf13/cobra"
 
-	kubeadmapiext "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubeadmapiv1alpha3 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1alpha3"
+	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
+	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
+	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	"k8s.io/kubernetes/cmd/kubeadm/app/phases/uploadconfig"
 	kubeadmutil "k8s.io/kubernetes/cmd/kubeadm/app/util"
 	configutil "k8s.io/kubernetes/cmd/kubeadm/app/util/config"
 	kubeconfigutil "k8s.io/kubernetes/cmd/kubeadm/app/util/kubeconfig"
+	"k8s.io/kubernetes/pkg/util/normalizer"
+)
+
+var (
+	uploadConfigLongDesc = fmt.Sprintf(normalizer.LongDesc(`
+		Uploads the kubeadm init configuration of your cluster to a ConfigMap called %s in the %s namespace. 
+		This enables correct configuration of system components and a seamless user experience when upgrading.
+
+		Alternatively, you can use kubeadm config.
+		`+cmdutil.AlphaDisclaimer), kubeadmconstants.InitConfigurationConfigMap, metav1.NamespaceSystem)
+
+	uploadConfigExample = normalizer.Examples(`
+		# uploads the configuration of your cluster
+		kubeadm alpha phase upload-config --config=myConfig.yaml
+		`)
 )
 
 // NewCmdUploadConfig returns the Cobra command for running the uploadconfig phase
 func NewCmdUploadConfig() *cobra.Command {
-	var cfgPath, kubeConfigFile string
+	cfg := &kubeadmapiv1alpha3.InitConfiguration{}
+	kubeConfigFile := kubeadmconstants.GetAdminKubeConfigPath()
+	var cfgPath string
+
 	cmd := &cobra.Command{
 		Use:     "upload-config",
-		Short:   "Upload the currently used configuration for kubeadm to a ConfigMap in the cluster for future use in reconfiguration and upgrades of the cluster.",
+		Short:   "Uploads the currently used configuration for kubeadm to a ConfigMap",
+		Long:    uploadConfigLongDesc,
+		Example: uploadConfigExample,
 		Aliases: []string{"uploadconfig"},
 		Run: func(_ *cobra.Command, args []string) {
 			if len(cfgPath) == 0 {
-				kubeadmutil.CheckErr(fmt.Errorf("The --config flag is mandatory"))
+				kubeadmutil.CheckErr(fmt.Errorf("the --config flag is mandatory"))
 			}
+
+			kubeConfigFile = cmdutil.FindExistingKubeConfig(kubeConfigFile)
 			client, err := kubeconfigutil.ClientSetFromFile(kubeConfigFile)
 			kubeadmutil.CheckErr(err)
 
-			defaultcfg := &kubeadmapiext.MasterConfiguration{}
-			internalcfg, err := configutil.ConfigFileAndDefaultsToInternalConfig(cfgPath, defaultcfg)
+			// KubernetesVersion is not used, but we set it explicitly to avoid the lookup
+			// of the version from the internet when executing ConfigFileAndDefaultsToInternalConfig
+			err = SetKubernetesVersion(client, cfg)
+			kubeadmutil.CheckErr(err)
+
+			internalcfg, err := configutil.ConfigFileAndDefaultsToInternalConfig(cfgPath, cfg)
 			kubeadmutil.CheckErr(err)
 
 			err = uploadconfig.UploadConfiguration(internalcfg, client)
@@ -51,8 +81,8 @@ func NewCmdUploadConfig() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&kubeConfigFile, "kubeconfig", "/etc/kubernetes/admin.conf", "The KubeConfig file to use for talking to the cluster")
-	cmd.Flags().StringVar(&cfgPath, "config", "", "Path to kubeadm config file (WARNING: Usage of a configuration file is experimental)")
+	options.AddKubeConfigFlag(cmd.Flags(), &kubeConfigFile)
+	cmd.Flags().StringVar(&cfgPath, "config", "", "Path to a kubeadm config file. WARNING: Usage of a configuration file is experimental")
 
 	return cmd
 }

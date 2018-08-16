@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"time"
 
+	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
-	extensions "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
@@ -41,15 +41,15 @@ type Prepuller interface {
 	DeleteFunc(string) error
 }
 
-// DaemonSetPrepuller makes sure the control plane images are availble on all masters
+// DaemonSetPrepuller makes sure the control plane images are available on all masters
 type DaemonSetPrepuller struct {
 	client clientset.Interface
-	cfg    *kubeadmapi.MasterConfiguration
+	cfg    *kubeadmapi.InitConfiguration
 	waiter apiclient.Waiter
 }
 
 // NewDaemonSetPrepuller creates a new instance of the DaemonSetPrepuller struct
-func NewDaemonSetPrepuller(client clientset.Interface, waiter apiclient.Waiter, cfg *kubeadmapi.MasterConfiguration) *DaemonSetPrepuller {
+func NewDaemonSetPrepuller(client clientset.Interface, waiter apiclient.Waiter, cfg *kubeadmapi.InitConfiguration) *DaemonSetPrepuller {
 	return &DaemonSetPrepuller{
 		client: client,
 		cfg:    cfg,
@@ -59,7 +59,12 @@ func NewDaemonSetPrepuller(client clientset.Interface, waiter apiclient.Waiter, 
 
 // CreateFunc creates a DaemonSet for making the image available on every relevant node
 func (d *DaemonSetPrepuller) CreateFunc(component string) error {
-	image := images.GetCoreImage(component, d.cfg.ImageRepository, d.cfg.KubernetesVersion, d.cfg.UnifiedControlPlaneImage)
+	var image string
+	if component == constants.Etcd {
+		image = images.GetEtcdImage(d.cfg)
+	} else {
+		image = images.GetKubeControlPlaneImage(component, d.cfg)
+	}
 	ds := buildPrePullDaemonSet(component, image)
 
 	// Create the DaemonSet in the API Server
@@ -87,7 +92,7 @@ func (d *DaemonSetPrepuller) DeleteFunc(component string) error {
 
 // PrepullImagesInParallel creates DaemonSets synchronously but waits in parallel for the images to pull
 func PrepullImagesInParallel(kubePrepuller Prepuller, timeout time.Duration) error {
-	componentsToPrepull := constants.MasterComponents
+	componentsToPrepull := append(constants.MasterComponents, constants.Etcd)
 	fmt.Printf("[upgrade/prepull] Will prepull images for components %v\n", componentsToPrepull)
 
 	timeoutChan := time.After(timeout)
@@ -99,11 +104,11 @@ func PrepullImagesInParallel(kubePrepuller Prepuller, timeout time.Duration) err
 		}
 	}
 
-	// Create a channel for streaming data from goroutines that run in parallell to a blocking for loop that cleans up
+	// Create a channel for streaming data from goroutines that run in parallel to a blocking for loop that cleans up
 	prePulledChan := make(chan string, len(componentsToPrepull))
 	for _, component := range componentsToPrepull {
 		go func(c string) {
-			// Wait as long as needed. This WaitFunc call should be blocking until completetion
+			// Wait as long as needed. This WaitFunc call should be blocking until completion
 			kubePrepuller.WaitFunc(c)
 			// When the task is done, go ahead and cleanup by sending the name to the channel
 			prePulledChan <- c
@@ -146,14 +151,14 @@ func addPrepullPrefix(component string) string {
 }
 
 // buildPrePullDaemonSet builds the DaemonSet that ensures the control plane image is available
-func buildPrePullDaemonSet(component, image string) *extensions.DaemonSet {
+func buildPrePullDaemonSet(component, image string) *apps.DaemonSet {
 	var gracePeriodSecs int64
-	return &extensions.DaemonSet{
+	return &apps.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      addPrepullPrefix(component),
 			Namespace: metav1.NamespaceSystem,
 		},
-		Spec: extensions.DaemonSetSpec{
+		Spec: apps.DaemonSetSpec{
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

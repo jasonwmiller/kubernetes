@@ -17,6 +17,7 @@ limitations under the License.
 package responsewriters
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -26,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
-	"k8s.io/apiserver/pkg/endpoints/request"
 )
 
 // Avoid emitting errors that look like valid HTML. Quotes are okay.
@@ -41,7 +41,7 @@ func BadGatewayError(w http.ResponseWriter, req *http.Request) {
 }
 
 // Forbidden renders a simple forbidden error
-func Forbidden(ctx request.Context, attributes authorizer.Attributes, w http.ResponseWriter, req *http.Request, reason string, s runtime.NegotiatedSerializer) {
+func Forbidden(ctx context.Context, attributes authorizer.Attributes, w http.ResponseWriter, req *http.Request, reason string, s runtime.NegotiatedSerializer) {
 	msg := sanitizer.Replace(forbiddenMessage(attributes))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
@@ -53,7 +53,7 @@ func Forbidden(ctx request.Context, attributes authorizer.Attributes, w http.Res
 	}
 	gv := schema.GroupVersion{Group: attributes.GetAPIGroup(), Version: attributes.GetAPIVersion()}
 	gr := schema.GroupResource{Group: attributes.GetAPIGroup(), Resource: attributes.GetResource()}
-	ErrorNegotiated(ctx, apierrors.NewForbidden(gr, attributes.GetName(), fmt.Errorf(errMsg)), s, gv, w, req)
+	ErrorNegotiated(apierrors.NewForbidden(gr, attributes.GetName(), fmt.Errorf(errMsg)), s, gv, w, req)
 }
 
 func forbiddenMessage(attributes authorizer.Attributes) string {
@@ -67,18 +67,15 @@ func forbiddenMessage(attributes authorizer.Attributes) string {
 	}
 
 	resource := attributes.GetResource()
-	if group := attributes.GetAPIGroup(); len(group) > 0 {
-		resource = resource + "." + group
-	}
 	if subresource := attributes.GetSubresource(); len(subresource) > 0 {
 		resource = resource + "/" + subresource
 	}
 
 	if ns := attributes.GetNamespace(); len(ns) > 0 {
-		return fmt.Sprintf("User %q cannot %s %s in the namespace %q", username, attributes.GetVerb(), resource, ns)
+		return fmt.Sprintf("User %q cannot %s resource %q in API group %q in the namespace %q", username, attributes.GetVerb(), resource, attributes.GetAPIGroup(), ns)
 	}
 
-	return fmt.Sprintf("User %q cannot %s %s at the cluster scope", username, attributes.GetVerb(), resource)
+	return fmt.Sprintf("User %q cannot %s resource %q in API group %q at the cluster scope", username, attributes.GetVerb(), resource, attributes.GetAPIGroup())
 }
 
 // InternalError renders a simple internal error

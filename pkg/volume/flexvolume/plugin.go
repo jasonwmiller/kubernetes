@@ -19,6 +19,7 @@ package flexvolume
 import (
 	"fmt"
 	"path"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -29,10 +30,14 @@ import (
 	"k8s.io/kubernetes/pkg/util/mount"
 	utilstrings "k8s.io/kubernetes/pkg/util/strings"
 	"k8s.io/kubernetes/pkg/volume"
+	"k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/utils/exec"
 )
 
-const flexVolumePluginName = "kubernetes.io/flexvolume"
+const (
+	flexVolumePluginName       = "kubernetes.io/flexvolume"
+	flexVolumePluginNamePrefix = "flexvolume-"
+)
 
 // FlexVolumePlugin object.
 type flexVolumePlugin struct {
@@ -53,13 +58,15 @@ type flexVolumeAttachablePlugin struct {
 var _ volume.AttachableVolumePlugin = &flexVolumeAttachablePlugin{}
 var _ volume.PersistentVolumePlugin = &flexVolumePlugin{}
 
+var _ volume.DeviceMountableVolumePlugin = &flexVolumeAttachablePlugin{}
+
 type PluginFactory interface {
-	NewFlexVolumePlugin(pluginDir, driverName string) (volume.VolumePlugin, error)
+	NewFlexVolumePlugin(pluginDir, driverName string, runner exec.Interface) (volume.VolumePlugin, error)
 }
 
 type pluginFactory struct{}
 
-func (pluginFactory) NewFlexVolumePlugin(pluginDir, name string) (volume.VolumePlugin, error) {
+func (pluginFactory) NewFlexVolumePlugin(pluginDir, name string, runner exec.Interface) (volume.VolumePlugin, error) {
 	execPath := path.Join(pluginDir, name)
 
 	driverName := utilstrings.UnescapePluginName(name)
@@ -67,7 +74,7 @@ func (pluginFactory) NewFlexVolumePlugin(pluginDir, name string) (volume.VolumeP
 	flexPlugin := &flexVolumePlugin{
 		driverName:          driverName,
 		execPath:            execPath,
-		runner:              exec.New(),
+		runner:              runner,
 		unsupportedCommands: []string{},
 	}
 
@@ -97,12 +104,16 @@ func (plugin *flexVolumePlugin) Init(host volume.VolumeHost) error {
 func (plugin *flexVolumePlugin) getExecutable() string {
 	parts := strings.Split(plugin.driverName, "/")
 	execName := parts[len(parts)-1]
-	return path.Join(plugin.execPath, execName)
+	execPath := path.Join(plugin.execPath, execName)
+	if runtime.GOOS == "windows" {
+		execPath = util.GetWindowsPath(execPath)
+	}
+	return execPath
 }
 
 // Name is part of the volume.VolumePlugin interface.
 func (plugin *flexVolumePlugin) GetPluginName() string {
-	return "flexvolume-" + plugin.driverName
+	return flexVolumePluginNamePrefix + plugin.driverName
 }
 
 // GetVolumeName is part of the volume.VolumePlugin interface.
@@ -129,8 +140,11 @@ func (plugin *flexVolumePlugin) GetVolumeName(spec *volume.Spec) (string, error)
 
 // CanSupport is part of the volume.VolumePlugin interface.
 func (plugin *flexVolumePlugin) CanSupport(spec *volume.Spec) bool {
-	source, _ := getVolumeSource(spec)
-	return (source != nil) && (source.Driver == plugin.driverName)
+	sourceDriver, err := getDriver(spec)
+	if err != nil {
+		return false
+	}
+	return sourceDriver == plugin.driverName
 }
 
 // RequiresRemount is part of the volume.VolumePlugin interface.
@@ -153,10 +167,19 @@ func (plugin *flexVolumePlugin) NewMounter(spec *volume.Spec, pod *api.Pod, _ vo
 
 // newMounterInternal is the internal mounter routine to build the volume.
 func (plugin *flexVolumePlugin) newMounterInternal(spec *volume.Spec, pod *api.Pod, mounter mount.Interface, runner exec.Interface) (volume.Mounter, error) {
-	source, readOnly := getVolumeSource(spec)
+	sourceDriver, err := getDriver(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	readOnly, err := getReadOnly(spec)
+	if err != nil {
+		return nil, err
+	}
+
 	return &flexVolumeMounter{
 		flexVolume: &flexVolume{
-			driverName:            source.Driver,
+			driverName:            sourceDriver,
 			execPath:              plugin.getExecutable(),
 			mounter:               mounter,
 			plugin:                plugin,
@@ -197,9 +220,17 @@ func (plugin *flexVolumeAttachablePlugin) NewAttacher() (volume.Attacher, error)
 	return &flexVolumeAttacher{plugin}, nil
 }
 
+func (plugin *flexVolumeAttachablePlugin) NewDeviceMounter() (volume.DeviceMounter, error) {
+	return plugin.NewAttacher()
+}
+
 // NewDetacher is part of the volume.AttachableVolumePlugin interface.
 func (plugin *flexVolumeAttachablePlugin) NewDetacher() (volume.Detacher, error) {
 	return &flexVolumeDetacher{plugin}, nil
+}
+
+func (plugin *flexVolumeAttachablePlugin) NewDeviceUnmounter() (volume.DeviceUnmounter, error) {
+	return plugin.NewDetacher()
 }
 
 // ConstructVolumeSpec is part of the volume.AttachableVolumePlugin interface.
@@ -244,7 +275,7 @@ func (plugin *flexVolumePlugin) isUnsupported(command string) bool {
 
 func (plugin *flexVolumePlugin) GetDeviceMountRefs(deviceMountPath string) ([]string, error) {
 	mounter := plugin.host.GetMounter(plugin.GetPluginName())
-	return mount.GetMountRefs(mounter, deviceMountPath)
+	return mounter.GetMountRefs(deviceMountPath)
 }
 
 func (plugin *flexVolumePlugin) getDeviceMountPath(spec *volume.Spec) (string, error) {

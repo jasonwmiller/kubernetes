@@ -60,10 +60,8 @@ type crdRegistrationController struct {
 	queue workqueue.RateLimitingInterface
 }
 
-// NewAutoRegistrationController returns a controller which will register TPR GroupVersions with the auto APIService registration
+// NewAutoRegistrationController returns a controller which will register CRD GroupVersions with the auto APIService registration
 // controller so they automatically stay in sync.
-// In order to stay sane with both TPR and CRD present, we have a single controller that manages both.  When choosing whether to have an
-// APIService, we simply iterate through both.
 func NewAutoRegistrationController(crdinformer crdinformers.CustomResourceDefinitionInformer, apiServiceRegistration AutoAPIServiceRegistration) *crdRegistrationController {
 	c := &crdRegistrationController{
 		crdLister:              crdinformer.Lister(),
@@ -79,9 +77,11 @@ func NewAutoRegistrationController(crdinformer crdinformers.CustomResourceDefini
 			cast := obj.(*apiextensions.CustomResourceDefinition)
 			c.enqueueCRD(cast)
 		},
-		UpdateFunc: func(_, obj interface{}) {
-			cast := obj.(*apiextensions.CustomResourceDefinition)
-			c.enqueueCRD(cast)
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			// Enqueue both old and new object to make sure we remove and add appropriate API services.
+			// The working queue will resolve any duplicates and only changes will stay in the queue.
+			c.enqueueCRD(oldObj.(*apiextensions.CustomResourceDefinition))
+			c.enqueueCRD(newObj.(*apiextensions.CustomResourceDefinition))
 		},
 		DeleteFunc: func(obj interface{}) {
 			cast, ok := obj.(*apiextensions.CustomResourceDefinition)
@@ -122,8 +122,10 @@ func (c *crdRegistrationController) Run(threadiness int, stopCh <-chan struct{})
 		utilruntime.HandleError(err)
 	} else {
 		for _, crd := range crds {
-			if err := c.syncHandler(schema.GroupVersion{Group: crd.Spec.Group, Version: crd.Spec.Version}); err != nil {
-				utilruntime.HandleError(err)
+			for _, version := range crd.Spec.Versions {
+				if err := c.syncHandler(schema.GroupVersion{Group: crd.Spec.Group, Version: version.Name}); err != nil {
+					utilruntime.HandleError(err)
+				}
 			}
 		}
 	}
@@ -184,11 +186,12 @@ func (c *crdRegistrationController) processNextWorkItem() bool {
 }
 
 func (c *crdRegistrationController) enqueueCRD(crd *apiextensions.CustomResourceDefinition) {
-	c.queue.Add(schema.GroupVersion{Group: crd.Spec.Group, Version: crd.Spec.Version})
+	for _, version := range crd.Spec.Versions {
+		c.queue.Add(schema.GroupVersion{Group: crd.Spec.Group, Version: version.Name})
+	}
 }
 
 func (c *crdRegistrationController) handleVersionUpdate(groupVersion schema.GroupVersion) error {
-	found := false
 	apiServiceName := groupVersion.Version + "." + groupVersion.Group
 
 	// check all CRDs.  There shouldn't that many, but if we have problems later we can index them
@@ -197,26 +200,27 @@ func (c *crdRegistrationController) handleVersionUpdate(groupVersion schema.Grou
 		return err
 	}
 	for _, crd := range crds {
-		if crd.Spec.Version == groupVersion.Version && crd.Spec.Group == groupVersion.Group {
-			found = true
-			break
+		if crd.Spec.Group != groupVersion.Group {
+			continue
+		}
+		for _, version := range crd.Spec.Versions {
+			if version.Name != groupVersion.Version || !version.Served {
+				continue
+			}
+
+			c.apiServiceRegistration.AddAPIServiceToSync(&apiregistration.APIService{
+				ObjectMeta: metav1.ObjectMeta{Name: apiServiceName},
+				Spec: apiregistration.APIServiceSpec{
+					Group:                groupVersion.Group,
+					Version:              groupVersion.Version,
+					GroupPriorityMinimum: 1000, // CRDs should have relatively low priority
+					VersionPriority:      100,  // CRDs will be sorted by kube-like versions like any other APIService with the same VersionPriority
+				},
+			})
+			return nil
 		}
 	}
 
-	if !found {
-		c.apiServiceRegistration.RemoveAPIServiceToSync(apiServiceName)
-		return nil
-	}
-
-	c.apiServiceRegistration.AddAPIServiceToSync(&apiregistration.APIService{
-		ObjectMeta: metav1.ObjectMeta{Name: apiServiceName},
-		Spec: apiregistration.APIServiceSpec{
-			Group:                groupVersion.Group,
-			Version:              groupVersion.Version,
-			GroupPriorityMinimum: 1000, // TPRs should have relatively low priority
-			VersionPriority:      100,  // TPRs should have relatively low priority
-		},
-	})
-
+	c.apiServiceRegistration.RemoveAPIServiceToSync(apiServiceName)
 	return nil
 }

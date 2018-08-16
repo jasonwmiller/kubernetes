@@ -10,6 +10,8 @@ go_library(
         "urls.go",
         "urlsmap.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/coreos/etcd/pkg/types",
+    importpath = "github.com/coreos/etcd/pkg/types",
     visibility = ["//visibility:public"],
 )
 

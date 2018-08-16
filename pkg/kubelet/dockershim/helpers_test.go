@@ -17,23 +17,20 @@ limitations under the License.
 package dockershim
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/blang/semver"
 	dockertypes "github.com/docker/docker/api/types"
 	dockernat "github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/v1alpha1/runtime"
-	"k8s.io/kubernetes/pkg/security/apparmor"
-
+	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 	"k8s.io/kubernetes/pkg/kubelet/dockershim/libdocker"
+	"k8s.io/kubernetes/pkg/security/apparmor"
 )
 
 func TestLabelsAndAnnotationsRoundTrip(t *testing.T) {
@@ -131,30 +128,6 @@ func TestParsingCreationConflictError(t *testing.T) {
 	require.Equal(t, matches[1], "24666ab8c814d16f986449e504ea0159468ddf8da01897144a770f66dce0e14e")
 }
 
-func TestGetSecurityOptSeparator(t *testing.T) {
-	for c, test := range map[string]struct {
-		desc     string
-		version  *semver.Version
-		expected rune
-	}{
-		"older docker version": {
-			version:  &semver.Version{Major: 1, Minor: 22, Patch: 0},
-			expected: ':',
-		},
-		"changed docker version": {
-			version:  &semver.Version{Major: 1, Minor: 23, Patch: 0},
-			expected: '=',
-		},
-		"newer docker version": {
-			version:  &semver.Version{Major: 1, Minor: 24, Patch: 0},
-			expected: '=',
-		},
-	} {
-		actual := getSecurityOptSeparator(test.version)
-		assert.Equal(t, test.expected, actual, c)
-	}
-}
-
 // writeDockerConfig will write a config file into a temporary dir, and return that dir.
 // Caller is responsible for deleting the dir and its contents.
 func writeDockerConfig(cfg string) (string, error) {
@@ -171,10 +144,7 @@ func writeDockerConfig(cfg string) (string, error) {
 
 func TestEnsureSandboxImageExists(t *testing.T) {
 	sandboxImage := "gcr.io/test/image"
-	registryHost := "https://gcr.io/"
 	authConfig := dockertypes.AuthConfig{Username: "user", Password: "pass"}
-	authB64 := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", authConfig.Username, authConfig.Password)))
-	authJSON := fmt.Sprintf("{\"auths\": {\"%s\": {\"auth\": \"%s\"} } }", registryHost, authB64)
 	for desc, test := range map[string]struct {
 		injectImage  bool
 		imgNeedsAuth bool
@@ -206,14 +176,6 @@ func TestEnsureSandboxImageExists(t *testing.T) {
 			calls:        []string{"inspect_image", "pull"},
 			err:          true,
 		},
-		"should pull private image using dockerauth if image doesn't exist": {
-			injectImage:  true,
-			imgNeedsAuth: true,
-			injectErr:    libdocker.ImageNotFoundError{ID: "image_id"},
-			calls:        []string{"inspect_image", "pull"},
-			configJSON:   authJSON,
-			err:          false,
-		},
 	} {
 		t.Logf("TestCase: %q", desc)
 		_, fakeDocker, _ := newTestDockerService()
@@ -226,15 +188,7 @@ func TestEnsureSandboxImageExists(t *testing.T) {
 		}
 		fakeDocker.InjectError("inspect_image", test.injectErr)
 
-		var dockerCfgSearchPath []string
-		if test.configJSON != "" {
-			tmpdir, err := writeDockerConfig(test.configJSON)
-			require.NoError(t, err, "could not create a temp docker config file")
-			dockerCfgSearchPath = append(dockerCfgSearchPath, filepath.Join(tmpdir, ".docker"))
-			defer os.RemoveAll(tmpdir)
-		}
-
-		err := ensureSandboxImageExistsDockerCfg(fakeDocker, sandboxImage, dockerCfgSearchPath)
+		err := ensureSandboxImageExists(fakeDocker, sandboxImage)
 		assert.NoError(t, fakeDocker.AssertCalls(test.calls))
 		assert.Equal(t, test.err, err != nil)
 	}
@@ -289,7 +243,7 @@ func TestMakePortsAndBindings(t *testing.T) {
 				},
 			},
 		},
-		"multipe port mappings": {
+		"multiple port mappings": {
 			pm: []*runtimeapi.PortMapping{
 				{
 					Protocol:      runtimeapi.Protocol_TCP,
@@ -388,5 +342,5 @@ func TestGenerateMountBindings(t *testing.T) {
 	}
 	result := generateMountBindings(mounts)
 
-	assert.Equal(t, result, expectedResult)
+	assert.Equal(t, expectedResult, result)
 }

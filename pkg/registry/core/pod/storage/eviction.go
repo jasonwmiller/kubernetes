@@ -17,6 +17,7 @@ limitations under the License.
 package storage
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -24,12 +25,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
-	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	genericregistry "k8s.io/apiserver/pkg/registry/generic/registry"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/kubernetes/pkg/api"
+	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/policy"
 	policyclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/policy/internalversion"
 )
@@ -64,6 +65,12 @@ type EvictionREST struct {
 }
 
 var _ = rest.Creater(&EvictionREST{})
+var _ = rest.GroupVersionKindProvider(&EvictionREST{})
+
+// GroupVersionKind specifies a particular GroupVersionKind to discovery
+func (r *EvictionREST) GroupVersionKind(containingGV schema.GroupVersion) schema.GroupVersionKind {
+	return schema.GroupVersionKind{Group: "policy", Version: "v1beta1", Kind: "Eviction"}
+}
 
 // New creates a new eviction resource
 func (r *EvictionREST) New() runtime.Object {
@@ -71,7 +78,7 @@ func (r *EvictionREST) New() runtime.Object {
 }
 
 // Create attempts to create a new eviction.  That is, it tries to evict a pod.
-func (r *EvictionREST) Create(ctx genericapirequest.Context, obj runtime.Object, includeUninitialized bool) (runtime.Object, error) {
+func (r *EvictionREST) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, options *metav1.CreateOptions) (runtime.Object, error) {
 	eviction := obj.(*policy.Eviction)
 
 	obj, err := r.store.Get(ctx, eviction.Name, &metav1.GetOptions{})
@@ -118,7 +125,7 @@ func (r *EvictionREST) Create(ctx genericapirequest.Context, obj runtime.Object,
 		return rtStatus, nil
 	}
 
-	// At this point there was either no PDB or we succeded in decrementing
+	// At this point there was either no PDB or we succeeded in decrementing
 
 	// Try the delete
 	_, _, err = r.store.Delete(ctx, eviction.Name, eviction.DeleteOptions)
@@ -170,7 +177,7 @@ func (r *EvictionREST) checkAndDecrement(namespace string, podName string, pdb p
 }
 
 // getPodDisruptionBudgets returns any PDBs that match the pod or err if there's an error.
-func (r *EvictionREST) getPodDisruptionBudgets(ctx genericapirequest.Context, pod *api.Pod) ([]policy.PodDisruptionBudget, error) {
+func (r *EvictionREST) getPodDisruptionBudgets(ctx context.Context, pod *api.Pod) ([]policy.PodDisruptionBudget, error) {
 	if len(pod.Labels) == 0 {
 		return nil, nil
 	}

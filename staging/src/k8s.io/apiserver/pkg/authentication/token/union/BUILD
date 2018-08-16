@@ -1,7 +1,5 @@
 package(default_visibility = ["//visibility:public"])
 
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -11,19 +9,19 @@ load(
 go_test(
     name = "go_default_test",
     srcs = ["unionauth_test.go"],
-    library = ":go_default_library",
-    tags = ["automanaged"],
-    deps = ["//vendor/k8s.io/apiserver/pkg/authentication/user:go_default_library"],
+    embed = [":go_default_library"],
+    deps = ["//staging/src/k8s.io/apiserver/pkg/authentication/user:go_default_library"],
 )
 
 go_library(
     name = "go_default_library",
     srcs = ["union.go"],
-    tags = ["automanaged"],
+    importmap = "k8s.io/kubernetes/vendor/k8s.io/apiserver/pkg/authentication/token/union",
+    importpath = "k8s.io/apiserver/pkg/authentication/token/union",
     deps = [
-        "//vendor/k8s.io/apimachinery/pkg/util/errors:go_default_library",
-        "//vendor/k8s.io/apiserver/pkg/authentication/authenticator:go_default_library",
-        "//vendor/k8s.io/apiserver/pkg/authentication/user:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/errors:go_default_library",
+        "//staging/src/k8s.io/apiserver/pkg/authentication/authenticator:go_default_library",
+        "//staging/src/k8s.io/apiserver/pkg/authentication/user:go_default_library",
     ],
 )
 

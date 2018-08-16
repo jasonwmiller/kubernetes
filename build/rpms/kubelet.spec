@@ -2,7 +2,7 @@ Name: kubelet
 Version: OVERRIDE_THIS
 Release: 00
 License: ASL 2.0
-Summary: Container Cluster Manager
+Summary: Container Cluster Manager - Kubernetes Node Agent
 
 URL: https://kubernetes.io
 
@@ -22,8 +22,8 @@ The node agent of Kubernetes, the container cluster manager.
 install -m 755 -d %{buildroot}%{_bindir}
 install -m 755 -d %{buildroot}%{_sysconfdir}/systemd/system/
 install -m 755 -d %{buildroot}%{_sysconfdir}/kubernetes/manifests/
-install -p -m 755 -t %{buildroot}%{_bindir} kubelet
-install -p -m 755 -t %{buildroot}%{_sysconfdir}/systemd/system/ kubelet.service
+install -p -m 755 -t %{buildroot}%{_bindir} {kubelet}
+install -p -m 755 -t %{buildroot}%{_sysconfdir}/systemd/system/ {kubelet.service}
 
 %files
 %{_bindir}/kubelet

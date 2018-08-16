@@ -151,6 +151,8 @@ go_library(
         "schemas.go",
         "types.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/rancher/go-rancher/client",
+    importpath = "github.com/rancher/go-rancher/client",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/gorilla/websocket:go_default_library",

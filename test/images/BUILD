@@ -1,13 +1,6 @@
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
-    name = "sources",
-    srcs = glob([
-        "**/*",
-    ]),
-)
-
-filegroup(
     name = "package-srcs",
     srcs = glob(["**"]),
     tags = ["automanaged"],
@@ -18,14 +11,14 @@ filegroup(
     name = "all-srcs",
     srcs = [
         ":package-srcs",
-        "//test/images/clusterapi-tester:all-srcs",
+        "//test/images/apparmor-loader:all-srcs",
+        "//test/images/echoserver:all-srcs",
         "//test/images/entrypoint-tester:all-srcs",
         "//test/images/fakegitserver:all-srcs",
-        "//test/images/goproxy:all-srcs",
         "//test/images/liveness:all-srcs",
         "//test/images/logs-generator:all-srcs",
+        "//test/images/metadata-concealment:all-srcs",
         "//test/images/mounttest:all-srcs",
-        "//test/images/n-way-http:all-srcs",
         "//test/images/net:all-srcs",
         "//test/images/netexec:all-srcs",
         "//test/images/nettest:all-srcs",
@@ -36,8 +29,10 @@ filegroup(
         "//test/images/port-forward-tester:all-srcs",
         "//test/images/porter:all-srcs",
         "//test/images/resource-consumer:all-srcs",
+        "//test/images/sample-apiserver:all-srcs",
         "//test/images/serve-hostname:all-srcs",
         "//test/images/test-webserver:all-srcs",
+        "//test/images/webhook:all-srcs",
     ],
     tags = ["automanaged"],
 )

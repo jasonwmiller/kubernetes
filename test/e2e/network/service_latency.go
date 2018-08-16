@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/kubernetes/test/e2e/framework"
 	testutils "k8s.io/kubernetes/test/utils"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	. "github.com/onsi/ginkgo"
 )
@@ -45,7 +46,12 @@ func (d durations) Swap(i, j int)      { d[i], d[j] = d[j], d[i] }
 var _ = SIGDescribe("Service endpoints latency", func() {
 	f := framework.NewDefaultFramework("svc-latency")
 
-	It("should not be very high [Conformance]", func() {
+	/*
+		Release : v1.9
+		Testname: Service endpoint latency, thresholds
+		Description: Run 100 iterations of create service with the Pod running the pause image, measure the time it takes for creating the service and the endpoint with the service name is available. These durations are captured for 100 iterations, then the durations are sorted to compue 50th, 90th and 99th percentile. The single server latency MUST not exceed liberally set thresholds of 20s for 50th percentile and 50s for the 90th percentile.
+	*/
+	framework.ConformanceIt("should not be very high ", func() {
 		const (
 			// These are very generous criteria. Ideally we will
 			// get this much lower in the future. See issue
@@ -68,9 +74,9 @@ var _ = SIGDescribe("Service endpoints latency", func() {
 		)
 
 		// Turn off rate limiting--it interferes with our measurements.
-		oldThrottle := f.ClientSet.Core().RESTClient().GetRateLimiter()
-		f.ClientSet.Core().RESTClient().(*restclient.RESTClient).Throttle = flowcontrol.NewFakeAlwaysRateLimiter()
-		defer func() { f.ClientSet.Core().RESTClient().(*restclient.RESTClient).Throttle = oldThrottle }()
+		oldThrottle := f.ClientSet.CoreV1().RESTClient().GetRateLimiter()
+		f.ClientSet.CoreV1().RESTClient().(*restclient.RESTClient).Throttle = flowcontrol.NewFakeAlwaysRateLimiter()
+		defer func() { f.ClientSet.CoreV1().RESTClient().(*restclient.RESTClient).Throttle = oldThrottle }()
 
 		failing := sets.NewString()
 		d, err := runServiceLatencies(f, parallelTrials, totalTrials)
@@ -121,7 +127,7 @@ func runServiceLatencies(f *framework.Framework, inParallel, total int) (output 
 	cfg := testutils.RCConfig{
 		Client:         f.ClientSet,
 		InternalClient: f.InternalClientset,
-		Image:          framework.GetPauseImageName(f.ClientSet),
+		Image:          imageutils.GetPauseImageName(),
 		Name:           "svc-latency-rc",
 		Namespace:      f.Namespace.Name,
 		Replicas:       1,
@@ -280,11 +286,11 @@ func startEndpointWatcher(f *framework.Framework, q *endpointQueries) {
 	_, controller := cache.NewInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				obj, err := f.ClientSet.Core().Endpoints(f.Namespace.Name).List(options)
+				obj, err := f.ClientSet.CoreV1().Endpoints(f.Namespace.Name).List(options)
 				return runtime.Object(obj), err
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return f.ClientSet.Core().Endpoints(f.Namespace.Name).Watch(options)
+				return f.ClientSet.CoreV1().Endpoints(f.Namespace.Name).Watch(options)
 			},
 		},
 		&v1.Endpoints{},
@@ -329,7 +335,7 @@ func singleServiceLatency(f *framework.Framework, name string, q *endpointQuerie
 		},
 	}
 	startTime := time.Now()
-	gotSvc, err := f.ClientSet.Core().Services(f.Namespace.Name).Create(svc)
+	gotSvc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(svc)
 	if err != nil {
 		return 0, err
 	}

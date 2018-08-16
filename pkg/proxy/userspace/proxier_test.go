@@ -32,7 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/kubernetes/pkg/api"
+	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/proxy"
 	ipttest "k8s.io/kubernetes/pkg/util/iptables/testing"
 	"k8s.io/utils/exec"
@@ -84,6 +84,31 @@ func waitForClosedPortUDP(p *Proxier, proxyPort int) error {
 		time.Sleep(1 * time.Millisecond)
 	}
 	return fmt.Errorf("port %d still open", proxyPort)
+}
+
+// udpEchoServer is a simple echo server in UDP, intended for testing the proxy.
+type udpEchoServer struct {
+	net.PacketConn
+}
+
+func newUDPEchoServer() (*udpEchoServer, error) {
+	packetconn, err := net.ListenPacket("udp", ":0")
+	if err != nil {
+		return nil, err
+	}
+	return &udpEchoServer{packetconn}, nil
+}
+
+func (r *udpEchoServer) Loop() {
+	var buffer [4096]byte
+	for {
+		n, cliAddr, err := r.ReadFrom(buffer[0:])
+		if err != nil {
+			fmt.Printf("ReadFrom failed: %v\n", err)
+			continue
+		}
+		r.WriteTo(buffer[0:n], cliAddr)
+	}
 }
 
 var tcpServerPort int32

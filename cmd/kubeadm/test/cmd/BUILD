@@ -9,6 +9,7 @@ load(
 go_library(
     name = "go_default_library",
     srcs = ["util.go"],
+    importpath = "k8s.io/kubernetes/cmd/kubeadm/test/cmd",
     deps = ["//vendor/github.com/spf13/cobra:go_default_library"],
 )
 
@@ -21,14 +22,18 @@ go_test(
         "token_test.go",
         "version_test.go",
     ],
-    args = ["--kubeadm-path=../../kubeadm"],
+    args = ["--kubeadm-path=$(location //cmd/kubeadm:kubeadm)"],
     data = ["//cmd/kubeadm"],
-    library = ":go_default_library",
+    embed = [":go_default_library"],
+    rundir = ".",
     tags = [
         "integration",
         "skip",
     ],
-    deps = ["//vendor/github.com/ghodss/yaml:go_default_library"],
+    deps = [
+        "//vendor/github.com/ghodss/yaml:go_default_library",
+        "//vendor/github.com/renstrom/dedent:go_default_library",
+    ],
 )
 
 filegroup(

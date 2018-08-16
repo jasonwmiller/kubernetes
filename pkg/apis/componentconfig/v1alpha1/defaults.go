@@ -17,176 +17,268 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-	"strings"
+	"net"
+	"strconv"
 	"time"
 
+	apimachineryconfigv1alpha1 "k8s.io/apimachinery/pkg/apis/config/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/kubernetes/pkg/api"
+	apiserverconfigv1alpha1 "k8s.io/apiserver/pkg/apis/config/v1alpha1"
+	api "k8s.io/kubernetes/pkg/apis/core"
 	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
-	"k8s.io/kubernetes/pkg/kubelet/qos"
 	"k8s.io/kubernetes/pkg/master/ports"
-)
-
-const (
-	DefaultRootDir = "/var/lib/kubelet"
-
-	AutoDetectCloudProvider = "auto-detect"
-
-	defaultIPTablesMasqueradeBit = 14
-	defaultIPTablesDropBit       = 15
-)
-
-var (
-	zeroDuration = metav1.Duration{}
-	// Refer to [Node Allocatable](https://git.k8s.io/community/contributors/design-proposals/node-allocatable.md) doc for more information.
-	defaultNodeAllocatableEnforcement = []string{"pods"}
+	utilpointer "k8s.io/utils/pointer"
 )
 
 func addDefaultingFuncs(scheme *kruntime.Scheme) error {
 	return RegisterDefaults(scheme)
 }
 
-func SetDefaults_KubeProxyConfiguration(obj *KubeProxyConfiguration) {
-	if len(obj.BindAddress) == 0 {
-		obj.BindAddress = "0.0.0.0"
-	}
-	if obj.HealthzBindAddress == "" {
-		obj.HealthzBindAddress = fmt.Sprintf("0.0.0.0:%v", ports.ProxyHealthzPort)
-	} else if !strings.Contains(obj.HealthzBindAddress, ":") {
-		obj.HealthzBindAddress += fmt.Sprintf(":%v", ports.ProxyHealthzPort)
-	}
-	if obj.MetricsBindAddress == "" {
-		obj.MetricsBindAddress = fmt.Sprintf("127.0.0.1:%v", ports.ProxyStatusPort)
-	} else if !strings.Contains(obj.MetricsBindAddress, ":") {
-		obj.MetricsBindAddress += fmt.Sprintf(":%v", ports.ProxyStatusPort)
-	}
-	if obj.OOMScoreAdj == nil {
-		temp := int32(qos.KubeProxyOOMScoreAdj)
-		obj.OOMScoreAdj = &temp
-	}
-	if obj.ResourceContainer == "" {
-		obj.ResourceContainer = "/kube-proxy"
-	}
-	if obj.IPTables.SyncPeriod.Duration == 0 {
-		obj.IPTables.SyncPeriod = metav1.Duration{Duration: 30 * time.Second}
-	}
+func SetDefaults_CloudControllerManagerConfiguration(obj *CloudControllerManagerConfiguration) {
 	zero := metav1.Duration{}
-	if obj.UDPIdleTimeout == zero {
-		obj.UDPIdleTimeout = metav1.Duration{Duration: 250 * time.Millisecond}
+	if obj.ServiceController.ConcurrentServiceSyncs == 0 {
+		obj.ServiceController.ConcurrentServiceSyncs = 1
 	}
-	// If ConntrackMax is set, respect it.
-	if obj.Conntrack.Max == 0 {
-		// If ConntrackMax is *not* set, use per-core scaling.
-		if obj.Conntrack.MaxPerCore == 0 {
-			obj.Conntrack.MaxPerCore = 32 * 1024
-		}
-		if obj.Conntrack.Min == 0 {
-			obj.Conntrack.Min = 128 * 1024
-		}
-	}
-	if obj.IPTables.MasqueradeBit == nil {
-		temp := int32(14)
-		obj.IPTables.MasqueradeBit = &temp
-	}
-	if obj.Conntrack.TCPEstablishedTimeout == zero {
-		obj.Conntrack.TCPEstablishedTimeout = metav1.Duration{Duration: 24 * time.Hour} // 1 day (1/5 default)
-	}
-	if obj.Conntrack.TCPCloseWaitTimeout == zero {
-		// See https://github.com/kubernetes/kubernetes/issues/32551.
-		//
-		// CLOSE_WAIT conntrack state occurs when the the Linux kernel
-		// sees a FIN from the remote server. Note: this is a half-close
-		// condition that persists as long as the local side keeps the
-		// socket open. The condition is rare as it is typical in most
-		// protocols for both sides to issue a close; this typically
-		// occurs when the local socket is lazily garbage collected.
-		//
-		// If the CLOSE_WAIT conntrack entry expires, then FINs from the
-		// local socket will not be properly SNAT'd and will not reach the
-		// remote server (if the connection was subject to SNAT). If the
-		// remote timeouts for FIN_WAIT* states exceed the CLOSE_WAIT
-		// timeout, then there will be an inconsistency in the state of
-		// the connection and a new connection reusing the SNAT (src,
-		// port) pair may be rejected by the remote side with RST. This
-		// can cause new calls to connect(2) to return with ECONNREFUSED.
-		//
-		// We set CLOSE_WAIT to one hour by default to better match
-		// typical server timeouts.
-		obj.Conntrack.TCPCloseWaitTimeout = metav1.Duration{Duration: 1 * time.Hour}
-	}
-	if obj.ConfigSyncPeriod.Duration == 0 {
-		obj.ConfigSyncPeriod.Duration = 15 * time.Minute
-	}
-
-	if len(obj.ClientConnection.ContentType) == 0 {
-		obj.ClientConnection.ContentType = "application/vnd.kubernetes.protobuf"
-	}
-	if obj.ClientConnection.QPS == 0.0 {
-		obj.ClientConnection.QPS = 5.0
-	}
-	if obj.ClientConnection.Burst == 0 {
-		obj.ClientConnection.Burst = 10
+	if obj.NodeStatusUpdateFrequency == zero {
+		obj.NodeStatusUpdateFrequency = metav1.Duration{Duration: 5 * time.Minute}
 	}
 }
 
-func SetDefaults_KubeSchedulerConfiguration(obj *KubeSchedulerConfiguration) {
-	if obj.Port == 0 {
-		obj.Port = ports.SchedulerPort
+func SetDefaults_KubeControllerManagerConfiguration(obj *KubeControllerManagerConfiguration) {
+	zero := metav1.Duration{}
+	if len(obj.Controllers) == 0 {
+		obj.Controllers = []string{"*"}
 	}
-	if obj.Address == "" {
-		obj.Address = "0.0.0.0"
+	if obj.EndPointController.ConcurrentEndpointSyncs == 0 {
+		obj.EndPointController.ConcurrentEndpointSyncs = 5
 	}
-	if obj.AlgorithmProvider == "" {
-		obj.AlgorithmProvider = "DefaultProvider"
+	if obj.ServiceController.ConcurrentServiceSyncs == 0 {
+		obj.ServiceController.ConcurrentServiceSyncs = 1
+	}
+	if obj.ReplicationController.ConcurrentRCSyncs == 0 {
+		obj.ReplicationController.ConcurrentRCSyncs = 5
+	}
+	if obj.ReplicaSetController.ConcurrentRSSyncs == 0 {
+		obj.ReplicaSetController.ConcurrentRSSyncs = 5
+	}
+	if obj.DaemonSetController.ConcurrentDaemonSetSyncs == 0 {
+		obj.DaemonSetController.ConcurrentDaemonSetSyncs = 2
+	}
+	if obj.JobController.ConcurrentJobSyncs == 0 {
+		obj.JobController.ConcurrentJobSyncs = 5
+	}
+	if obj.ResourceQuotaController.ConcurrentResourceQuotaSyncs == 0 {
+		obj.ResourceQuotaController.ConcurrentResourceQuotaSyncs = 5
+	}
+	if obj.DeploymentController.ConcurrentDeploymentSyncs == 0 {
+		obj.DeploymentController.ConcurrentDeploymentSyncs = 5
+	}
+	if obj.NamespaceController.ConcurrentNamespaceSyncs == 0 {
+		obj.NamespaceController.ConcurrentNamespaceSyncs = 10
+	}
+	if obj.SAController.ConcurrentSATokenSyncs == 0 {
+		obj.SAController.ConcurrentSATokenSyncs = 5
+	}
+	if obj.ResourceQuotaController.ResourceQuotaSyncPeriod == zero {
+		obj.ResourceQuotaController.ResourceQuotaSyncPeriod = metav1.Duration{Duration: 5 * time.Minute}
+	}
+	if obj.NamespaceController.NamespaceSyncPeriod == zero {
+		obj.NamespaceController.NamespaceSyncPeriod = metav1.Duration{Duration: 5 * time.Minute}
+	}
+	if obj.PersistentVolumeBinderController.PVClaimBinderSyncPeriod == zero {
+		obj.PersistentVolumeBinderController.PVClaimBinderSyncPeriod = metav1.Duration{Duration: 15 * time.Second}
+	}
+	if obj.HPAController.HorizontalPodAutoscalerSyncPeriod == zero {
+		obj.HPAController.HorizontalPodAutoscalerSyncPeriod = metav1.Duration{Duration: 30 * time.Second}
+	}
+	if obj.HPAController.HorizontalPodAutoscalerUpscaleForbiddenWindow == zero {
+		obj.HPAController.HorizontalPodAutoscalerUpscaleForbiddenWindow = metav1.Duration{Duration: 3 * time.Minute}
+	}
+	if obj.HPAController.HorizontalPodAutoscalerDownscaleForbiddenWindow == zero {
+		obj.HPAController.HorizontalPodAutoscalerDownscaleForbiddenWindow = metav1.Duration{Duration: 5 * time.Minute}
+	}
+	if obj.HPAController.HorizontalPodAutoscalerTolerance == 0 {
+		obj.HPAController.HorizontalPodAutoscalerTolerance = 0.1
+	}
+	if obj.DeploymentController.DeploymentControllerSyncPeriod == zero {
+		obj.DeploymentController.DeploymentControllerSyncPeriod = metav1.Duration{Duration: 30 * time.Second}
+	}
+	if obj.DeprecatedController.RegisterRetryCount == 0 {
+		obj.DeprecatedController.RegisterRetryCount = 10
+	}
+	if obj.NodeLifecycleController.PodEvictionTimeout == zero {
+		obj.NodeLifecycleController.PodEvictionTimeout = metav1.Duration{Duration: 5 * time.Minute}
+	}
+	if obj.NodeLifecycleController.NodeMonitorGracePeriod == zero {
+		obj.NodeLifecycleController.NodeMonitorGracePeriod = metav1.Duration{Duration: 40 * time.Second}
+	}
+	if obj.NodeLifecycleController.NodeStartupGracePeriod == zero {
+		obj.NodeLifecycleController.NodeStartupGracePeriod = metav1.Duration{Duration: 60 * time.Second}
+	}
+	if obj.NodeIpamController.NodeCIDRMaskSize == 0 {
+		obj.NodeIpamController.NodeCIDRMaskSize = 24
+	}
+	if obj.PodGCController.TerminatedPodGCThreshold == 0 {
+		obj.PodGCController.TerminatedPodGCThreshold = 12500
+	}
+	if obj.GarbageCollectorController.EnableGarbageCollector == nil {
+		obj.GarbageCollectorController.EnableGarbageCollector = utilpointer.BoolPtr(true)
+	}
+	if obj.GarbageCollectorController.ConcurrentGCSyncs == 0 {
+		obj.GarbageCollectorController.ConcurrentGCSyncs = 20
+	}
+	if obj.CSRSigningController.ClusterSigningCertFile == "" {
+		obj.CSRSigningController.ClusterSigningCertFile = "/etc/kubernetes/ca/ca.pem"
+	}
+	if obj.CSRSigningController.ClusterSigningKeyFile == "" {
+		obj.CSRSigningController.ClusterSigningKeyFile = "/etc/kubernetes/ca/ca.key"
+	}
+	if obj.CSRSigningController.ClusterSigningDuration == zero {
+		obj.CSRSigningController.ClusterSigningDuration = metav1.Duration{Duration: 365 * 24 * time.Hour}
+	}
+	if obj.AttachDetachController.ReconcilerSyncLoopPeriod == zero {
+		obj.AttachDetachController.ReconcilerSyncLoopPeriod = metav1.Duration{Duration: 60 * time.Second}
+	}
+	if obj.NodeLifecycleController.EnableTaintManager == nil {
+		obj.NodeLifecycleController.EnableTaintManager = utilpointer.BoolPtr(true)
+	}
+	if obj.HPAController.HorizontalPodAutoscalerUseRESTClients == nil {
+		obj.HPAController.HorizontalPodAutoscalerUseRESTClients = utilpointer.BoolPtr(true)
+	}
+}
+
+func SetDefaults_GenericComponentConfiguration(obj *GenericComponentConfiguration) {
+	zero := metav1.Duration{}
+	if obj.MinResyncPeriod == zero {
+		obj.MinResyncPeriod = metav1.Duration{Duration: 12 * time.Hour}
 	}
 	if obj.ContentType == "" {
 		obj.ContentType = "application/vnd.kubernetes.protobuf"
 	}
 	if obj.KubeAPIQPS == 0 {
-		obj.KubeAPIQPS = 50.0
+		obj.KubeAPIQPS = 20.0
 	}
 	if obj.KubeAPIBurst == 0 {
-		obj.KubeAPIBurst = 100
+		obj.KubeAPIBurst = 30
 	}
-	if obj.SchedulerName == "" {
+	if obj.ControllerStartInterval == zero {
+		obj.ControllerStartInterval = metav1.Duration{Duration: 0 * time.Second}
+	}
+
+	// Use the default LeaderElectionConfiguration options
+	apiserverconfigv1alpha1.RecommendedDefaultLeaderElectionConfiguration(&obj.LeaderElection)
+}
+
+func SetDefaults_KubeCloudSharedConfiguration(obj *KubeCloudSharedConfiguration) {
+	zero := metav1.Duration{}
+	// Port
+	if obj.Address == "" {
+		obj.Address = "0.0.0.0"
+	}
+	if obj.RouteReconciliationPeriod == zero {
+		obj.RouteReconciliationPeriod = metav1.Duration{Duration: 10 * time.Second}
+	}
+	if obj.NodeMonitorPeriod == zero {
+		obj.NodeMonitorPeriod = metav1.Duration{Duration: 5 * time.Second}
+	}
+	if obj.ClusterName == "" {
+		obj.ClusterName = "kubernetes"
+	}
+	if obj.ConfigureCloudRoutes == nil {
+		obj.ConfigureCloudRoutes = utilpointer.BoolPtr(true)
+	}
+}
+
+func SetDefaults_PersistentVolumeRecyclerConfiguration(obj *PersistentVolumeRecyclerConfiguration) {
+	if obj.MaximumRetry == 0 {
+		obj.MaximumRetry = 3
+	}
+	if obj.MinimumTimeoutNFS == 0 {
+		obj.MinimumTimeoutNFS = 300
+	}
+	if obj.IncrementTimeoutNFS == 0 {
+		obj.IncrementTimeoutNFS = 30
+	}
+	if obj.MinimumTimeoutHostPath == 0 {
+		obj.MinimumTimeoutHostPath = 60
+	}
+	if obj.IncrementTimeoutHostPath == 0 {
+		obj.IncrementTimeoutHostPath = 30
+	}
+}
+
+func SetDefaults_VolumeConfiguration(obj *VolumeConfiguration) {
+	if obj.EnableHostPathProvisioning == nil {
+		obj.EnableHostPathProvisioning = utilpointer.BoolPtr(false)
+	}
+	if obj.EnableDynamicProvisioning == nil {
+		obj.EnableDynamicProvisioning = utilpointer.BoolPtr(true)
+	}
+	if obj.FlexVolumePluginDir == "" {
+		obj.FlexVolumePluginDir = "/usr/libexec/kubernetes/kubelet-plugins/volume/exec/"
+	}
+}
+
+func SetDefaults_KubeSchedulerConfiguration(obj *KubeSchedulerConfiguration) {
+	if len(obj.SchedulerName) == 0 {
 		obj.SchedulerName = api.DefaultSchedulerName
 	}
+
 	if obj.HardPodAffinitySymmetricWeight == 0 {
 		obj.HardPodAffinitySymmetricWeight = api.DefaultHardPodAffinitySymmetricWeight
 	}
-	if obj.FailureDomains == "" {
+
+	if obj.AlgorithmSource.Policy == nil &&
+		(obj.AlgorithmSource.Provider == nil || len(*obj.AlgorithmSource.Provider) == 0) {
+		val := SchedulerDefaultProviderName
+		obj.AlgorithmSource.Provider = &val
+	}
+
+	if policy := obj.AlgorithmSource.Policy; policy != nil {
+		if policy.ConfigMap != nil && len(policy.ConfigMap.Namespace) == 0 {
+			obj.AlgorithmSource.Policy.ConfigMap.Namespace = api.NamespaceSystem
+		}
+	}
+
+	if host, port, err := net.SplitHostPort(obj.HealthzBindAddress); err == nil {
+		if len(host) == 0 {
+			host = "0.0.0.0"
+		}
+		obj.HealthzBindAddress = net.JoinHostPort(host, port)
+	} else {
+		obj.HealthzBindAddress = net.JoinHostPort("0.0.0.0", strconv.Itoa(ports.SchedulerPort))
+	}
+
+	if host, port, err := net.SplitHostPort(obj.MetricsBindAddress); err == nil {
+		if len(host) == 0 {
+			host = "0.0.0.0"
+		}
+		obj.MetricsBindAddress = net.JoinHostPort(host, port)
+	} else {
+		obj.MetricsBindAddress = net.JoinHostPort("0.0.0.0", strconv.Itoa(ports.SchedulerPort))
+	}
+
+	if obj.ClientConnection.QPS == 0.0 {
+		obj.ClientConnection.QPS = 50.0
+	}
+
+	if obj.ClientConnection.Burst == 0 {
+		obj.ClientConnection.Burst = 100
+	}
+
+	if len(obj.LeaderElection.LockObjectNamespace) == 0 {
+		obj.LeaderElection.LockObjectNamespace = SchedulerDefaultLockObjectNamespace
+	}
+	if len(obj.LeaderElection.LockObjectName) == 0 {
+		obj.LeaderElection.LockObjectName = SchedulerDefaultLockObjectName
+	}
+
+	if len(obj.FailureDomains) == 0 {
 		obj.FailureDomains = kubeletapis.DefaultFailureDomains
 	}
-	if obj.LockObjectNamespace == "" {
-		obj.LockObjectNamespace = SchedulerDefaultLockObjectNamespace
-	}
-	if obj.LockObjectName == "" {
-		obj.LockObjectName = SchedulerDefaultLockObjectName
-	}
-	if obj.PolicyConfigMapNamespace == "" {
-		obj.PolicyConfigMapNamespace = api.NamespaceSystem
-	}
-}
 
-func SetDefaults_LeaderElectionConfiguration(obj *LeaderElectionConfiguration) {
-	zero := metav1.Duration{}
-	if obj.LeaseDuration == zero {
-		obj.LeaseDuration = metav1.Duration{Duration: 15 * time.Second}
-	}
-	if obj.RenewDeadline == zero {
-		obj.RenewDeadline = metav1.Duration{Duration: 10 * time.Second}
-	}
-	if obj.RetryPeriod == zero {
-		obj.RetryPeriod = metav1.Duration{Duration: 2 * time.Second}
-	}
-	if obj.ResourceLock == "" {
-		// obj.ResourceLock = rl.EndpointsResourceLock
-		obj.ResourceLock = "endpoints"
-	}
-}
-
-func boolVar(b bool) *bool {
-	return &b
+	// Use the default ClientConnectionConfiguration and LeaderElectionConfiguration options
+	apimachineryconfigv1alpha1.RecommendedDefaultClientConnectionConfiguration(&obj.ClientConnection)
+	apiserverconfigv1alpha1.RecommendedDefaultLeaderElectionConfiguration(&obj.LeaderElection.LeaderElectionConfiguration)
 }

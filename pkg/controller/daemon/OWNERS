@@ -1,7 +1,9 @@
 approvers:
 - mikedanese
-reviewers:
-- mikedanese
-- kargakis
-- lukaszo
 - janetkuo
+reviewers:
+- janetkuo
+- lukaszo
+- mikedanese
+- tnozicka
+- k82cn

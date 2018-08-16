@@ -8,19 +8,17 @@ go_library(
         "fswriters.go",
         "readers.go",
         "temp_unix.go",
+        "temp_windows.go",
         "writeflusher.go",
         "writers.go",
-    ] + select({
-        "@io_bazel_rules_go//go/platform:windows_amd64": [
-            "temp_windows.go",
-        ],
-        "//conditions:default": [],
-    }),
+    ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/docker/docker/pkg/ioutils",
+    importpath = "github.com/docker/docker/pkg/ioutils",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/golang.org/x/net/context:go_default_library",
     ] + select({
-        "@io_bazel_rules_go//go/platform:windows_amd64": [
+        "@io_bazel_rules_go//go/platform:windows": [
             "//vendor/github.com/docker/docker/pkg/longpath:go_default_library",
         ],
         "//conditions:default": [],

@@ -23,9 +23,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	// required for triggering api machinery startup when running unit tests
-	_ "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/install"
-
 	"k8s.io/client-go/tools/clientcmd"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
@@ -38,12 +35,13 @@ import (
 
 func TestKubeConfigCSubCommandsHasFlags(t *testing.T) {
 
-	subCmds := getKubeConfigSubCommands(nil, "")
+	subCmds := getKubeConfigSubCommands(nil, "", phaseTestK8sVersion)
 
 	commonFlags := []string{
 		"cert-dir",
 		"apiserver-advertise-address",
 		"apiserver-bind-port",
+		"kubeconfig-dir",
 	}
 
 	var tests = []struct {
@@ -167,18 +165,22 @@ func TestKubeConfigSubCommandsThatCreateFilesWithFlags(t *testing.T) {
 		// Adds a pki folder with a ca certs to the temp folder
 		pkidir := testutil.SetupPkiDirWithCertificateAuthorithy(t, tmpdir)
 
-		// Retrives ca cert for assertions
+		outputdir := tmpdir
+
+		// Retrieves ca cert for assertions
 		caCert, _, err := pkiutil.TryLoadCertAndKeyFromDisk(pkidir, kubeadmconstants.CACertAndKeyBaseName)
 		if err != nil {
-			t.Fatalf("couldn't retrive ca cert: %v", err)
+			t.Fatalf("couldn't retrieve ca cert: %v", err)
 		}
 
 		// Get subcommands working in the temporary directory
-		subCmds := getKubeConfigSubCommands(nil, tmpdir)
+		subCmds := getKubeConfigSubCommands(nil, tmpdir, phaseTestK8sVersion)
 
 		// Execute the subcommand
 		certDirFlag := fmt.Sprintf("--cert-dir=%s", pkidir)
+		outputDirFlag := fmt.Sprintf("--kubeconfig-dir=%s", outputdir)
 		allFlags := append(commonFlags, certDirFlag)
+		allFlags = append(allFlags, outputDirFlag)
 		allFlags = append(allFlags, test.additionalFlags...)
 		cmdtestutil.RunSubCommand(t, subCmds, test.command, allFlags...)
 
@@ -191,7 +193,7 @@ func TestKubeConfigSubCommandsThatCreateFilesWithFlags(t *testing.T) {
 			// reads generated files
 			config, err := clientcmd.LoadFromFile(filepath.Join(tmpdir, file))
 			if err != nil {
-				t.Errorf("Couldn't load generated kubeconfig file: %v", err)
+				t.Errorf("couldn't load generated kubeconfig file: %v", err)
 			}
 
 			// checks that CLI flags are properly propagated and kubeconfig properties are correct
@@ -267,22 +269,22 @@ func TestKubeConfigSubCommandsThatCreateFilesWithConfigFile(t *testing.T) {
 		// Adds a pki folder with a ca certs to the temp folder
 		pkidir := testutil.SetupPkiDirWithCertificateAuthorithy(t, tmpdir)
 
-		// Retrives ca cert for assertions
+		// Retrieves ca cert for assertions
 		caCert, _, err := pkiutil.TryLoadCertAndKeyFromDisk(pkidir, kubeadmconstants.CACertAndKeyBaseName)
 		if err != nil {
-			t.Fatalf("couldn't retrive ca cert: %v", err)
+			t.Fatalf("couldn't retrieve ca cert: %v", err)
 		}
 
 		// Adds a master configuration file
-		cfg := &kubeadmapi.MasterConfiguration{
-			API:             kubeadmapi.API{AdvertiseAddress: "1.2.3.4", BindPort: 1234},
-			CertificatesDir: pkidir,
-			NodeName:        "valid-node-name",
+		cfg := &kubeadmapi.InitConfiguration{
+			API:              kubeadmapi.API{AdvertiseAddress: "1.2.3.4", BindPort: 1234},
+			CertificatesDir:  pkidir,
+			NodeRegistration: kubeadmapi.NodeRegistrationOptions{Name: "valid-node-name"},
 		}
-		cfgPath := testutil.SetupMasterConfigurationFile(t, tmpdir, cfg)
+		cfgPath := testutil.SetupInitConfigurationFile(t, tmpdir, cfg)
 
 		// Get subcommands working in the temporary directory
-		subCmds := getKubeConfigSubCommands(nil, tmpdir)
+		subCmds := getKubeConfigSubCommands(nil, tmpdir, phaseTestK8sVersion)
 
 		// Execute the subcommand
 		configFlag := fmt.Sprintf("--config=%s", cfgPath)
@@ -297,7 +299,7 @@ func TestKubeConfigSubCommandsThatCreateFilesWithConfigFile(t *testing.T) {
 			// reads generated files
 			config, err := clientcmd.LoadFromFile(filepath.Join(tmpdir, file))
 			if err != nil {
-				t.Errorf("Couldn't load generated kubeconfig file: %v", err)
+				t.Errorf("couldn't load generated kubeconfig file: %v", err)
 			}
 
 			// checks that config file properties are properly propagated and kubeconfig properties are correct
@@ -320,10 +322,12 @@ func TestKubeConfigSubCommandsThatWritesToOut(t *testing.T) {
 	// Adds a pki folder with a ca cert to the temp folder
 	pkidir := testutil.SetupPkiDirWithCertificateAuthorithy(t, tmpdir)
 
-	// Retrives ca cert for assertions
+	outputdir := tmpdir
+
+	// Retrieves ca cert for assertions
 	caCert, _, err := pkiutil.TryLoadCertAndKeyFromDisk(pkidir, kubeadmconstants.CACertAndKeyBaseName)
 	if err != nil {
-		t.Fatalf("couldn't retrive ca cert: %v", err)
+		t.Fatalf("couldn't retrieve ca cert: %v", err)
 	}
 
 	commonFlags := []string{
@@ -331,6 +335,7 @@ func TestKubeConfigSubCommandsThatWritesToOut(t *testing.T) {
 		"--apiserver-bind-port=1234",
 		"--client-name=myUser",
 		fmt.Sprintf("--cert-dir=%s", pkidir),
+		fmt.Sprintf("--kubeconfig-dir=%s", outputdir),
 	}
 
 	var tests = []struct {
@@ -354,7 +359,7 @@ func TestKubeConfigSubCommandsThatWritesToOut(t *testing.T) {
 		buf := new(bytes.Buffer)
 
 		// Get subcommands working in the temporary directory
-		subCmds := getKubeConfigSubCommands(buf, tmpdir)
+		subCmds := getKubeConfigSubCommands(buf, tmpdir, phaseTestK8sVersion)
 
 		// Execute the subcommand
 		allFlags := append(commonFlags, test.additionalFlags...)
@@ -363,7 +368,7 @@ func TestKubeConfigSubCommandsThatWritesToOut(t *testing.T) {
 		// reads kubeconfig written to stdout
 		config, err := clientcmd.Load(buf.Bytes())
 		if err != nil {
-			t.Errorf("Couldn't read kubeconfig file from buffer: %v", err)
+			t.Errorf("couldn't read kubeconfig file from buffer: %v", err)
 			continue
 		}
 

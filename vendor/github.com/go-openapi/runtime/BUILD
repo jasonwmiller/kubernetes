@@ -19,6 +19,8 @@ go_library(
         "values.go",
         "xml.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/go-openapi/runtime",
+    importpath = "github.com/go-openapi/runtime",
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/go-openapi/errors:go_default_library",

@@ -19,15 +19,16 @@ package server
 import (
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/golang/glog"
 
 	"k8s.io/apiserver/pkg/authentication/user"
 	genericapifilters "k8s.io/apiserver/pkg/endpoints/filters"
-	apirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/server"
 	genericfilters "k8s.io/apiserver/pkg/server/filters"
+	"k8s.io/apiserver/pkg/server/options"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/rest"
 )
@@ -39,17 +40,17 @@ import (
 func BuildInsecureHandlerChain(apiHandler http.Handler, c *server.Config) http.Handler {
 	handler := apiHandler
 	if utilfeature.DefaultFeatureGate.Enabled(features.AdvancedAuditing) {
-		handler = genericapifilters.WithAudit(handler, c.RequestContextMapper, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
+		handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
 	} else {
-		handler = genericapifilters.WithLegacyAudit(handler, c.RequestContextMapper, c.LegacyAuditWriter)
+		handler = genericapifilters.WithLegacyAudit(handler, c.LegacyAuditWriter)
 	}
-	handler = genericapifilters.WithAuthentication(handler, c.RequestContextMapper, insecureSuperuser{}, nil)
+	handler = genericapifilters.WithAuthentication(handler, insecureSuperuser{}, nil)
 	handler = genericfilters.WithCORS(handler, c.CorsAllowedOriginList, nil, nil, nil, "true")
+	handler = genericfilters.WithTimeoutForNonLongRunningRequests(handler, c.LongRunningFunc, c.RequestTimeout)
+	handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
+	handler = genericfilters.WithWaitGroup(handler, c.LongRunningFunc, c.HandlerChainWaitGroup)
+	handler = genericapifilters.WithRequestInfo(handler, server.NewRequestInfoResolver(c))
 	handler = genericfilters.WithPanicRecovery(handler)
-	handler = genericfilters.WithTimeoutForNonLongRunningRequests(handler, c.RequestContextMapper, c.LongRunningFunc, c.RequestTimeout)
-	handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.RequestContextMapper, c.LongRunningFunc)
-	handler = genericapifilters.WithRequestInfo(handler, server.NewRequestInfoResolver(c), c.RequestContextMapper)
-	handler = apirequest.WithRequestContext(handler, c.RequestContextMapper)
 
 	return handler
 }
@@ -62,7 +63,7 @@ type InsecureServingInfo struct {
 	BindNetwork string
 }
 
-func (s *InsecureServingInfo) NewLoopbackClientConfig(token string) (*rest.Config, error) {
+func (s *InsecureServingInfo) NewLoopbackClientConfig() (*rest.Config, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -84,12 +85,12 @@ func (s *InsecureServingInfo) NewLoopbackClientConfig(token string) (*rest.Confi
 
 // NonBlockingRun spawns the insecure http server. An error is
 // returned if the ports cannot be listened on.
-func NonBlockingRun(insecureServingInfo *InsecureServingInfo, insecureHandler http.Handler, stopCh <-chan struct{}) error {
+func NonBlockingRun(insecureServingInfo *InsecureServingInfo, insecureHandler http.Handler, shutDownTimeout time.Duration, stopCh <-chan struct{}) error {
 	// Use an internal stop channel to allow cleanup of the listeners on error.
 	internalStopCh := make(chan struct{})
 
 	if insecureServingInfo != nil && insecureHandler != nil {
-		if err := serveInsecurely(insecureServingInfo, insecureHandler, internalStopCh); err != nil {
+		if err := serveInsecurely(insecureServingInfo, insecureHandler, shutDownTimeout, internalStopCh); err != nil {
 			close(internalStopCh)
 			return err
 		}
@@ -109,15 +110,18 @@ func NonBlockingRun(insecureServingInfo *InsecureServingInfo, insecureHandler ht
 // serveInsecurely run the insecure http server. It fails only if the initial listen
 // call fails. The actual server loop (stoppable by closing stopCh) runs in a go
 // routine, i.e. serveInsecurely does not block.
-func serveInsecurely(insecureServingInfo *InsecureServingInfo, insecureHandler http.Handler, stopCh <-chan struct{}) error {
+func serveInsecurely(insecureServingInfo *InsecureServingInfo, insecureHandler http.Handler, shutDownTimeout time.Duration, stopCh <-chan struct{}) error {
 	insecureServer := &http.Server{
 		Addr:           insecureServingInfo.BindAddress,
 		Handler:        insecureHandler,
 		MaxHeaderBytes: 1 << 20,
 	}
 	glog.Infof("Serving insecurely on %s", insecureServingInfo.BindAddress)
-	var err error
-	_, err = server.RunServer(insecureServer, insecureServingInfo.BindNetwork, stopCh)
+	ln, _, err := options.CreateListener(insecureServingInfo.BindNetwork, insecureServingInfo.BindAddress)
+	if err != nil {
+		return err
+	}
+	err = server.RunServer(insecureServer, ln, shutDownTimeout, stopCh)
 	return err
 }
 

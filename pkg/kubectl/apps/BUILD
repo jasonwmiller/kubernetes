@@ -1,7 +1,5 @@
 package(default_visibility = ["//visibility:public"])
 
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -11,8 +9,8 @@ load(
 go_library(
     name = "go_default_library",
     srcs = ["kind_visitor.go"],
-    tags = ["automanaged"],
-    deps = ["//vendor/k8s.io/apimachinery/pkg/runtime/schema:go_default_library"],
+    importpath = "k8s.io/kubernetes/pkg/kubectl/apps",
+    deps = ["//staging/src/k8s.io/apimachinery/pkg/runtime/schema:go_default_library"],
 )
 
 filegroup(
@@ -29,14 +27,16 @@ filegroup(
 )
 
 go_test(
-    name = "go_default_xtest",
+    name = "go_default_test",
     srcs = [
         "apps_suite_test.go",
         "kind_visitor_test.go",
     ],
+    embed = [":go_default_library"],
     deps = [
-        ":go_default_library",
         "//vendor/github.com/onsi/ginkgo:go_default_library",
+        "//vendor/github.com/onsi/ginkgo/config:go_default_library",
+        "//vendor/github.com/onsi/ginkgo/types:go_default_library",
         "//vendor/github.com/onsi/gomega:go_default_library",
     ],
 )

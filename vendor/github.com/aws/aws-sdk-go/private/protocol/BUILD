@@ -4,10 +4,18 @@ go_library(
     name = "go_default_library",
     srcs = [
         "idempotency.go",
+        "jsonvalue.go",
+        "payload.go",
         "unmarshal.go",
     ],
+    importmap = "k8s.io/kubernetes/vendor/github.com/aws/aws-sdk-go/private/protocol",
+    importpath = "github.com/aws/aws-sdk-go/private/protocol",
     visibility = ["//visibility:public"],
-    deps = ["//vendor/github.com/aws/aws-sdk-go/aws/request:go_default_library"],
+    deps = [
+        "//vendor/github.com/aws/aws-sdk-go/aws:go_default_library",
+        "//vendor/github.com/aws/aws-sdk-go/aws/client/metadata:go_default_library",
+        "//vendor/github.com/aws/aws-sdk-go/aws/request:go_default_library",
+    ],
 )
 
 filegroup(
@@ -26,7 +34,6 @@ filegroup(
         "//vendor/github.com/aws/aws-sdk-go/private/protocol/jsonrpc:all-srcs",
         "//vendor/github.com/aws/aws-sdk-go/private/protocol/query:all-srcs",
         "//vendor/github.com/aws/aws-sdk-go/private/protocol/rest:all-srcs",
-        "//vendor/github.com/aws/aws-sdk-go/private/protocol/restxml:all-srcs",
         "//vendor/github.com/aws/aws-sdk-go/private/protocol/xml/xmlutil:all-srcs",
     ],
     tags = ["automanaged"],

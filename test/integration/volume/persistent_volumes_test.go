@@ -34,8 +34,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	ref "k8s.io/client-go/tools/reference"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/testapi"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	fakecloud "k8s.io/kubernetes/pkg/cloudprovider/providers/fake"
 	persistentvolumecontroller "k8s.io/kubernetes/pkg/controller/volume/persistentvolume"
 	"k8s.io/kubernetes/pkg/volume"
@@ -43,6 +42,7 @@ import (
 	"k8s.io/kubernetes/test/integration/framework"
 
 	"github.com/golang/glog"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // Several tests in this file are configurable by environment variables:
@@ -258,7 +258,7 @@ func TestPersistentVolumeBindRace(t *testing.T) {
 	// putting a bind manually on a pv should only match the claim it is bound to
 	rand.Seed(time.Now().Unix())
 	claim := claims[rand.Intn(maxClaims-1)]
-	claimRef, err := ref.GetReference(api.Scheme, claim)
+	claimRef, err := ref.GetReference(legacyscheme.Scheme, claim)
 	if err != nil {
 		t.Fatalf("Unexpected error getting claimRef: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestPersistentVolumeMultiPVs(t *testing.T) {
 	pvs := make([]*v1.PersistentVolume, maxPVs)
 	for i := 0; i < maxPVs; i++ {
 		// This PV will be claimed, released, and deleted
-		pvs[i] = createPV("pv-"+strconv.Itoa(i), "/tmp/foo"+strconv.Itoa(i), strconv.Itoa(i)+"G",
+		pvs[i] = createPV("pv-"+strconv.Itoa(i), "/tmp/foo"+strconv.Itoa(i), strconv.Itoa(i+1)+"G",
 			[]v1.PersistentVolumeAccessMode{v1.ReadWriteOnce}, v1.PersistentVolumeReclaimRetain)
 	}
 
@@ -765,7 +765,7 @@ func TestPersistentVolumeControllerStartup(t *testing.T) {
 
 		pv := createPV(pvName, "/tmp/foo"+strconv.Itoa(i), "1G",
 			[]v1.PersistentVolumeAccessMode{v1.ReadWriteOnce}, v1.PersistentVolumeReclaimRetain)
-		claimRef, err := ref.GetReference(api.Scheme, newPVC)
+		claimRef, err := ref.GetReference(legacyscheme.Scheme, newPVC)
 		if err != nil {
 			glog.V(3).Infof("unexpected error getting claim reference: %v", err)
 			return
@@ -1099,13 +1099,13 @@ func createClients(ns *v1.Namespace, t *testing.T, s *httptest.Server, syncPerio
 	// creates many objects and default values were too low.
 	binderClient := clientset.NewForConfigOrDie(&restclient.Config{
 		Host:          s.URL,
-		ContentConfig: restclient.ContentConfig{GroupVersion: testapi.Groups[v1.GroupName].GroupVersion()},
+		ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}},
 		QPS:           1000000,
 		Burst:         1000000,
 	})
 	testClient := clientset.NewForConfigOrDie(&restclient.Config{
 		Host:          s.URL,
-		ContentConfig: restclient.ContentConfig{GroupVersion: testapi.Groups[v1.GroupName].GroupVersion()},
+		ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}},
 		QPS:           1000000,
 		Burst:         1000000,
 	})
@@ -1135,6 +1135,8 @@ func createClients(ns *v1.Namespace, t *testing.T, s *httptest.Server, syncPerio
 			VolumeInformer:            informers.Core().V1().PersistentVolumes(),
 			ClaimInformer:             informers.Core().V1().PersistentVolumeClaims(),
 			ClassInformer:             informers.Storage().V1().StorageClasses(),
+			PodInformer:               informers.Core().V1().Pods(),
+			NodeInformer:              informers.Core().V1().Nodes(),
 			EnableDynamicProvisioning: true,
 		})
 	if err != nil {

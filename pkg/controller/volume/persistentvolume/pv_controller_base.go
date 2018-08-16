@@ -40,6 +40,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 	"k8s.io/kubernetes/pkg/controller"
+	"k8s.io/kubernetes/pkg/controller/volume/persistentvolume/metrics"
 	"k8s.io/kubernetes/pkg/util/goroutinemap"
 	vol "k8s.io/kubernetes/pkg/volume"
 
@@ -61,6 +62,8 @@ type ControllerParameters struct {
 	VolumeInformer            coreinformers.PersistentVolumeInformer
 	ClaimInformer             coreinformers.PersistentVolumeClaimInformer
 	ClassInformer             storageinformers.StorageClassInformer
+	PodInformer               coreinformers.PodInformer
+	NodeInformer              coreinformers.NodeInformer
 	EventRecorder             record.EventRecorder
 	EnableDynamicProvisioning bool
 }
@@ -70,7 +73,8 @@ func NewController(p ControllerParameters) (*PersistentVolumeController, error) 
 	eventRecorder := p.EventRecorder
 	if eventRecorder == nil {
 		broadcaster := record.NewBroadcaster()
-		broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(p.KubeClient.Core().RESTClient()).Events("")})
+		broadcaster.StartLogging(glog.Infof)
+		broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: p.KubeClient.CoreV1().Events("")})
 		eventRecorder = broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "persistentvolume-controller"})
 	}
 
@@ -117,6 +121,10 @@ func NewController(p ControllerParameters) (*PersistentVolumeController, error) 
 
 	controller.classLister = p.ClassInformer.Lister()
 	controller.classListerSynced = p.ClassInformer.Informer().HasSynced
+	controller.podLister = p.PodInformer.Lister()
+	controller.podListerSynced = p.PodInformer.Informer().HasSynced
+	controller.NodeLister = p.NodeInformer.Lister()
+	controller.NodeListerSynced = p.NodeInformer.Informer().HasSynced
 	return controller, nil
 }
 
@@ -242,11 +250,15 @@ func (ctrl *PersistentVolumeController) deleteClaim(claim *v1.PersistentVolumeCl
 	_ = ctrl.claims.Delete(claim)
 	glog.V(4).Infof("claim %q deleted", claimToClaimKey(claim))
 
+	volumeName := claim.Spec.VolumeName
+	if volumeName == "" {
+		glog.V(5).Infof("deleteClaim[%q]: volume not bound", claimToClaimKey(claim))
+		return
+	}
 	// sync the volume when its claim is deleted.  Explicitly sync'ing the
 	// volume here in response to claim deletion prevents the volume from
 	// waiting until the next sync period for its Release.
-	volumeName := claim.Spec.VolumeName
-	glog.V(5).Infof("deleteClaim[%s]: scheduling sync of volume %q", claimToClaimKey(claim), volumeName)
+	glog.V(5).Infof("deleteClaim[%q]: scheduling sync of volume %s", claimToClaimKey(claim), volumeName)
 	ctrl.volumeQueue.Add(volumeName)
 }
 
@@ -257,9 +269,9 @@ func (ctrl *PersistentVolumeController) Run(stopCh <-chan struct{}) {
 	defer ctrl.volumeQueue.ShutDown()
 
 	glog.Infof("Starting persistent volume controller")
-	defer glog.Infof("Shutting down peristent volume controller")
+	defer glog.Infof("Shutting down persistent volume controller")
 
-	if !controller.WaitForCacheSync("persistent volume", stopCh, ctrl.volumeListerSynced, ctrl.claimListerSynced, ctrl.classListerSynced) {
+	if !controller.WaitForCacheSync("persistent volume", stopCh, ctrl.volumeListerSynced, ctrl.claimListerSynced, ctrl.classListerSynced, ctrl.podListerSynced, ctrl.NodeListerSynced) {
 		return
 	}
 
@@ -268,6 +280,8 @@ func (ctrl *PersistentVolumeController) Run(stopCh <-chan struct{}) {
 	go wait.Until(ctrl.resync, ctrl.resyncPeriod, stopCh)
 	go wait.Until(ctrl.volumeWorker, time.Second, stopCh)
 	go wait.Until(ctrl.claimWorker, time.Second, stopCh)
+
+	metrics.Register(ctrl.volumes.store, ctrl.claims)
 
 	<-stopCh
 }
@@ -424,7 +438,7 @@ func (ctrl *PersistentVolumeController) setClaimProvisioner(claim *v1.Persistent
 	// modify these, therefore create a copy.
 	claimClone := claim.DeepCopy()
 	metav1.SetMetaDataAnnotation(&claimClone.ObjectMeta, annStorageProvisioner, class.Provisioner)
-	newClaim, err := ctrl.kubeClient.Core().PersistentVolumeClaims(claim.Namespace).Update(claimClone)
+	newClaim, err := ctrl.kubeClient.CoreV1().PersistentVolumeClaims(claim.Namespace).Update(claimClone)
 	if err != nil {
 		return newClaim, err
 	}

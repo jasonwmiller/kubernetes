@@ -28,8 +28,10 @@ const GroupName = "kubeadm.k8s.io"
 var SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: runtime.APIVersionInternal}
 
 var (
+	// SchemeBuilder points to a list of functions added to Scheme.
 	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
-	AddToScheme   = SchemeBuilder.AddToScheme
+	// AddToScheme applies all the stored functions to the scheme.
+	AddToScheme = SchemeBuilder.AddToScheme
 )
 
 // Kind takes an unqualified kind and returns a Group qualified GroupKind
@@ -44,8 +46,8 @@ func Resource(resource string) schema.GroupResource {
 
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&MasterConfiguration{},
-		&NodeConfiguration{},
+		&InitConfiguration{},
+		&JoinConfiguration{},
 	)
 	return nil
 }
